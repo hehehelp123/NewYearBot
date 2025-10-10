@@ -11,4 +11,12 @@ class BotService:
         response.raise_for_status()
         return response.json()
 
+    async def get_menu(self):
+        response = await http_client.client.get(
+            f"{settings.ORCHESTRATOR_URL}/api/v1/menu"
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 bot_service = BotService()

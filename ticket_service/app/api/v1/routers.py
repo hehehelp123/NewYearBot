@@ -6,6 +6,27 @@ from app.services.ticket_service import TicketService
 
 router = APIRouter()
 
+@router.get("/features")
+def get_ticket_service_features():
+    return [
+        {
+            "name": "Поддержка",
+            "type": "menu",
+            "items": [
+                {
+                    "name": "Создать тикет",
+                    "type": "action",
+                    "method": "POST",
+                    "url": "/api/v1/tickets",
+                    "payload": {
+                        "requester_user_id": {"type": "integer", "description": "ID пользователя, создающего тикет"},
+                        "title": {"type": "string", "description": "Тема обращения"}
+                    }
+                }
+            ]
+        }
+    ]
+
 @router.get("/")
 def read_root():
     return {"service": "Ticket Service", "status": "ok"}

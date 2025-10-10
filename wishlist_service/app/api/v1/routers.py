@@ -7,6 +7,28 @@ from app.services.wishlist_service import WishlistService
 
 router = APIRouter()
 
+@router.get("/features")
+def get_wishlist_service_features():
+    return [
+        {
+            "name": "Вишлисты",
+            "type": "menu",
+            "items": [
+                {
+                    "name": "Создать вишлист",
+                    "type": "action",
+                    "method": "POST",
+                    "url": "/api/v1/wishlists",
+                    "payload": {
+                        "owner_user_id": {"type": "integer", "description": "ID владельца"},
+                        "name": {"type": "string", "description": "Название вишлиста"}
+                    }
+                }
+            ]
+        }
+    ]
+
+
 @router.get("/")
 def read_root():
     return {"service": "Wishlist Service", "status": "ok"}
