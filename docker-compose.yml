@@ -1,0 +1,252 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - backend
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user_db:
+    image: postgres:16-alpine
+    container_name: user_db
+    volumes:
+      - user_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${USER_DB_USER}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD}
+      POSTGRES_DB: ${USER_DB_NAME}
+    ports:
+      - "5433:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USER_DB_USER} -d ${USER_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  wishlist_db:
+    image: postgres:16-alpine
+    container_name: wishlist_db
+    volumes:
+      - wishlist_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${WISHLIST_DB_USER}
+      POSTGRES_PASSWORD: ${WISHLIST_DB_PASSWORD}
+      POSTGRES_DB: ${WISHLIST_DB_NAME}
+    ports:
+      - "5434:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WISHLIST_DB_USER} -d ${WISHLIST_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ticket_db:
+    image: postgres:16-alpine
+    container_name: ticket_db
+    volumes:
+      - ticket_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${TICKET_DB_USER}
+      POSTGRES_PASSWORD: ${TICKET_DB_PASSWORD}
+      POSTGRES_DB: ${TICKET_DB_NAME}
+    ports:
+      - "5435:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TICKET_DB_USER} -d ${TICKET_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notification_db:
+    image: postgres:16-alpine
+    container_name: notification_db
+    volumes:
+      - notification_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${NOTIFICATION_DB_USER}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME}
+    ports:
+      - "5436:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER} -d ${NOTIFICATION_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - user_db
+      - wishlist_db
+      - ticket_db
+      - notification_db
+    networks:
+      - backend
+
+  tg_bot_service:
+    build:
+      context: ./tg_bot_service
+    container_name: tg_bot_service
+    env_file:
+      - .env
+    command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+    depends_on:
+      - orchestrator_service
+
+  orchestrator_service:
+    build:
+      context: ./orchestrator_service
+    container_name: orchestrator_service
+    env_file:
+      - .env
+    command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8001
+    ports:
+      - "8001:8001"
+    networks:
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+      user_service:
+        condition: service_started
+      wishlist_service:
+        condition: service_started
+      ticket_service:
+        condition: service_started
+
+  user_service:
+    build:
+      context: ./user_service
+    container_name: user_service
+    env_file:
+      - .env
+    environment:
+      - PYTEST_ANYIO_BACKEND=asyncio
+    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002"
+    ports:
+      - "8002:8002"
+    networks:
+      - backend
+    depends_on:
+      user_db:
+        condition: service_healthy
+
+  wishlist_service:
+    build:
+      context: ./wishlist_service
+    container_name: wishlist_service
+    env_file:
+      - .env
+    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8003"
+    ports:
+      - "8003:8003"
+    networks:
+      - backend
+    depends_on:
+      wishlist_db:
+        condition: service_healthy
+
+  ticket_service:
+    build:
+      context: ./ticket_service
+    container_name: ticket_service
+    env_file:
+      - .env
+    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8004"
+    ports:
+      - "8004:8004"
+    networks:
+      - backend
+    depends_on:
+      ticket_db:
+        condition: service_healthy
+
+  notification_service:
+    build:
+      context: ./notification_service
+    container_name: notification_service
+    env_file:
+      - .env
+    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8005"
+    ports:
+      - "8005:8005"
+    networks:
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+      notification_db:
+        condition: service_healthy
+
+  music_uploader_service:
+    build:
+      context: ./music_uploader_service
+    container_name: music_uploader_service
+    env_file:
+      - .env
+    command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8006
+    ports:
+      - "8006:8006"
+    networks:
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  user_db_data:
+  wishlist_db_data:
+  ticket_db_data:
+  notification_db_data:
+
+networks:
+  backend:
+    driver: bridge
