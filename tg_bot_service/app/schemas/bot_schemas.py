@@ -1,5 +1,8 @@
 from pydantic import BaseModel
+from typing import Optional
 
-class StartCommand(BaseModel):
-    telegram_id: int
-    username: str | None = None
+class HealthCheckResponse(BaseModel):
+    status: str 
+    message: str 
+    bot_id: Optional[int] = None
+    username: Optional[str] = None 
