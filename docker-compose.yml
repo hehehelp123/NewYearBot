@@ -161,6 +161,8 @@ services:
         condition: service_started
       ticket_service:
         condition: service_started
+      music_uploader_service:
+        condition: service_started
 
   user_service:
     build:

@@ -12,6 +12,7 @@ class MenuService:
             settings.USER_SERVICE_URL,
             settings.WISHLIST_SERVICE_URL,
             settings.TICKET_SERVICE_URL,
+            settings.MUSIC_UPLOADER_SERVICE_URL,
         ]
         self.menu_tree = {}
         self.client = httpx.AsyncClient()

@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "user-service"
+name = "music-uploader-service"
 version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
@@ -14,15 +14,17 @@ alembic = "^1.13.1"
 asyncpg = "^0.29.0"
 pydantic-settings = "^2.2.1"
 aiokafka = "^0.10.0"
+httpx = "^0.27.0"
+yandex-music = "^2.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.1"
-httpx = "^0.27.0"
+aiosqlite = "^0.20.0"
+trio = "^0.25.1"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 pythonpath = "."
