@@ -1,4 +1,4 @@
 from pydantic import BaseModel, HttpUrl
 
-class YandexMusicSyncRequest(BaseModel):
+class MusicSyncRequest(BaseModel):
     source_url: HttpUrl

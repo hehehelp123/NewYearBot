@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 from app.schemas.user_schemas import UserCreateRequest
+from app.schemas.music_schemas import MusicSyncRequest
 from app.services.orchestration_service import orchestration_service
 
 router = APIRouter()
@@ -15,3 +16,7 @@ def read_root():
 @router.post("/users/")
 async def register_user(user: UserCreateRequest):
     return await orchestration_service.register_user(user)
+
+@router.post("/music/sync")
+async def sync_music(payload: MusicSyncRequest):
+    return await orchestration_service.sync_yandex_music(payload)
