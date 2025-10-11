@@ -63,13 +63,12 @@ def build_menu_keyboard(item_names: List[str], add_start: bool = False) -> Reply
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 async def start_button_handler(message: Message, state: FSMContext) -> None:
-    if message.text == START_BUTTON:
-        await state.clear()
-        item_names = await get_root_items() 
-        kb = build_menu_keyboard(item_names)
-        await state.update_data(current_node=await load_schema())
-        await message.answer("Выберите пункт меню:", reply_markup=kb)
-        return
+    await state.clear()
+    item_names = await get_root_items() 
+    kb = build_menu_keyboard(item_names)
+    await state.update_data(current_node=await load_schema())
+    await message.answer("Выберите пункт меню:", reply_markup=kb)
+    return
 
 async def start_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -79,7 +78,7 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         kb = build_menu_keyboard(item_names)
         await message.answer("Выберите пункт меню:", reply_markup=kb)
     else:
-        await message.answer("Схема меню пуста или не найдена. Отправьте текст — я повторю его.")
+        await message.answer("Схема меню пуста или не найдена.")
 
 async def menu_handler(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
@@ -139,9 +138,7 @@ async def process_action_field(message: Message, state: FSMContext) -> None:
         item_names = await get_root_items()
         kb = build_menu_keyboard(item_names, add_start=True)
         await state.clear()
-        await state.update_data(current_node=current_node)
-        await message.answer("Выберите пункт меню:", reply_markup=kb)
-        return
+        await start_handler(message, state)
 
     current_field = fields[current_field_idx]
     collected_data[current_field] = message.text
