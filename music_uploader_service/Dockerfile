@@ -6,19 +6,22 @@ ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 ENV PATH="$POETRY_HOME/bin:$PATH"
 
-RUN apt-get update && apt-get install --no-install-recommends -y curl build-essential
+RUN apt-get update && apt-get install --no-install-recommends -y curl build-essential ffmpeg
+
 RUN curl -sSL https://install.python-poetry.org | python -
 
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-root
+RUN poetry install --no-root --only main
 
 FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg
+
 ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
-ENV PATH="$POETRY_HOME/bin:$PATH"
+ENV PATH="/opt/poetry/bin:/app/.venv/bin:$PATH"
 
 COPY --from=builder /opt/poetry /opt/poetry
 COPY --from=builder /app/.venv ./.venv

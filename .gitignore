@@ -95,3 +95,7 @@ venv.bak
 # mypy
 .mypy_cache/
 /.idea
+ — копия.env
+/chrome_profile_data
+/edge_profile_data
+/selenium_downloads
