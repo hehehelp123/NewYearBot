@@ -9,7 +9,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
 
 from app.core.config import settings
 from app.services.downloader import COOKIE_FILE, DOWNLOAD_PATH
@@ -30,7 +30,6 @@ class SeleniumUploader:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        # options.add_argument("--headless=new") # Временно отключаем для отладки
         options.add_argument("--user-data-dir=/home/seluser/.config/microsoft-edge")
 
         try:
@@ -102,47 +101,60 @@ class SeleniumUploader:
         logger.info(f"Cookies успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
 
     async def upload_track(self, driver: webdriver.Remote, track_path: str) -> bool:
+        max_attempts = 3
+        retry_delay = 1
+        absolute_track_path = os.path.abspath(track_path)
+
+        if not os.path.exists(absolute_track_path):
+            logger.error(f"Файл для загрузки не найден по пути: {absolute_track_path}")
+            return False
+
         try:
             logger.info(f"Открытие страницы плейлиста для загрузки: {settings.SELENIUM_PLAYLIST_URL}")
             driver.get(settings.SELENIUM_PLAYLIST_URL)
-            wait = WebDriverWait(driver, 60)
 
-            upload_container_xpath = "//button[normalize-space()='Upload track']/ancestor::div[1]"
-            upload_container = wait.until(EC.presence_of_element_located((By.XPATH, upload_container_xpath)))
-            file_input = upload_container.find_element(By.CSS_SELECTOR, "input[type='file']")
+            for attempt in range(max_attempts):
+                try:
+                    wait = WebDriverWait(driver, 20)
+                    upload_container_xpath = "//button[normalize-space()='Upload track']/ancestor::div[1]"
+                    upload_container = wait.until(EC.presence_of_element_located((By.XPATH, upload_container_xpath)))
+                    file_input = upload_container.find_element(By.CSS_SELECTOR, "input[type='file']")
 
-            driver.execute_script(
-                "arguments[0].style.opacity=1; arguments[0].style.transform='translate(0px, 0px) scale(1)'; "
-                "arguments[0].style.visibility='visible'; arguments[0].style.display='block';",
-                file_input
-            )
+                    driver.execute_script(
+                        "arguments[0].style.opacity=1; arguments[0].style.transform='translate(0px, 0px) scale(1)'; "
+                        "arguments[0].style.visibility='visible'; arguments[0].style.display='block';",
+                        file_input
+                    )
 
-            absolute_track_path = os.path.abspath(track_path)
-            if not os.path.exists(absolute_track_path):
-                logger.error(f"Файл для загрузки не найден по пути: {absolute_track_path}")
-                return False
+                    logger.info(f"Попытка {attempt + 1}/{max_attempts}: Отправка файла '{absolute_track_path}' в Selenium...")
+                    file_input.send_keys(absolute_track_path)
 
-            logger.info(f"Отправка файла '{absolute_track_path}' в Selenium...")
-            file_input.send_keys(absolute_track_path)
+                    loader_locator = (By.CSS_SELECTOR, ".file-loader_uploading")
+                    wait.until(EC.presence_of_element_located(loader_locator))
+                    logger.info("Процесс загрузки начался. Ожидание завершения...")
+                    upload_wait = WebDriverWait(driver, 300)
+                    upload_wait.until(EC.invisibility_of_element_located(loader_locator))
+                    logger.info("Загрузка успешно завершена (индикатор исчез).")
 
-            try:
-                loader_locator = (By.CSS_SELECTOR, ".file-loader_uploading")
-                wait.until(EC.presence_of_element_located(loader_locator))
-                logger.info("Процесс загрузки начался. Ожидание завершения...")
-                upload_wait = WebDriverWait(driver, 300)
-                upload_wait.until(EC.invisibility_of_element_located(loader_locator))
-                logger.info("Загрузка успешно завершена (индикатор исчез).")
-            except TimeoutException:
-                logger.warning("Не удалось отследить индикатор загрузки. Возможно, трек уже загружен.")
+                    time.sleep(5)
+                    return True
 
-            time.sleep(5)
-            return True
+                except StaleElementReferenceException:
+                    logger.warning(
+                        f"Попытка {attempt + 1}/{max_attempts} не удалась: StaleElementReferenceException. "
+                        f"Элемент устарел. Повтор через {retry_delay} сек."
+                    )
+                    time.sleep(retry_delay)
+                except TimeoutException:
+                    logger.warning("Не удалось отследить индикатор загрузки. Возможно, трек уже загружен.")
+                    time.sleep(5)
+                    return True
+
+            logger.error(f"Не удалось загрузить трек после {max_attempts} попыток.")
+            return False
 
         except Exception as e:
-            # Расширенная диагностика при ошибке
-            logger.error(f"Произошла ошибка при загрузке через Selenium: {e}", exc_info=True)
-
-            # Сохраняем улики в папку /app/downloads, которая видна на хост-машине
+            logger.error(f"Произошла критическая ошибка при загрузке через Selenium: {e}", exc_info=True)
             debug_path = DOWNLOAD_PATH
             screenshot_path = os.path.join(debug_path, f"selenium_debug_screenshot_{int(time.time())}.png")
             pagesource_path = os.path.join(debug_path, f"selenium_debug_pagesource_{int(time.time())}.html")

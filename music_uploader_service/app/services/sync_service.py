@@ -70,12 +70,13 @@ class MusicSyncService:
         self.selenium_lock = asyncio.Lock()
 
     async def start(self):
+        await self.yandex_manager.initialize()
         logger.info("MusicSyncService запущен и готов к работе.")
 
     def stop(self):
         logger.info("MusicSyncService остановлен.")
 
-    async def _sync_with_selenium(self, source_url: str):
+    async def _sync_with_selenium(self, source_url: str, user_id: int):
         logger.info(f"Фоновая задача для {source_url} ожидает доступа к Selenium...")
         async with self.selenium_lock:
             logger.info(f"Доступ к Selenium получен. Запуск синхронизации для {source_url}")
@@ -87,25 +88,31 @@ class MusicSyncService:
                     downloaded_data = await download_audio(source_url, user_agent)
                     if not downloaded_data:
                         logger.error(f"Фоновая задача: не удалось скачать аудио с {source_url}")
+                        await kafka_producer.send("selenium.upload.failed",
+                                                  {"user_id": user_id, "telegram_id": user_id, "source_url": source_url,
+                                                   "reason": "Download failed"})
                         return
 
                     for path, title in downloaded_data:
                         success = await selenium_uploader.upload_track(driver, path)
+                        event_payload = {"user_id": user_id, "telegram_id": user_id, "title": title,
+                                         "source_url": source_url}
                         if success:
                             logger.info(f"Фоновая задача: трек '{title}' успешно загружен через Selenium.")
+                            await kafka_producer.send("selenium.upload.success", event_payload)
                         else:
                             logger.error(f"Фоновая задача: ошибка при загрузке '{title}' через Selenium.")
+                            await kafka_producer.send("selenium.upload.failed",
+                                                      {"reason": "Selenium upload error", **event_payload})
             except Exception as e:
                 logger.critical(f"Критическая ошибка в задаче синхронизации Selenium: {e}", exc_info=True)
+                await kafka_producer.send("selenium.upload.failed",
+                                          {"user_id": user_id, "telegram_id": user_id, "source_url": source_url,
+                                           "reason": "Critical error in sync task"})
         logger.info(f"Задача для {source_url} завершена, доступ к Selenium освобожден.")
-
 
     async def _sync_with_yandex_api(self, source_url: str) -> dict:
         logger.info(f"Запуск синхронизации через Yandex API для {source_url}")
-        try:
-            await self.yandex_manager.initialize()
-        except Exception:
-            return {"status": "error", "detail": "Не удалось подключиться к API Яндекс.Музыки. Проверьте токен."}
 
         destination_playlist = await self.yandex_manager.find_playlist_by_name(
             settings.YANDEX_DESTINATION_PLAYLIST_NAME)

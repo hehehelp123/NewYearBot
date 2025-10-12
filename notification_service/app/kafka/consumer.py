@@ -8,10 +8,12 @@ from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
+
 async def handle_event(event_data: dict, event_type: str):
     async with AsyncSessionLocal() as session:
         notification_service = NotificationService(session)
-        await notification_service.create_reminder_from_event(event_data, event_type)
+        await notification_service.create_and_send_notification(event_data, event_type)
+
 
 class KafkaConsumer:
     def __init__(self, *topics: str):
@@ -41,8 +43,16 @@ class KafkaConsumer:
     async def _consume(self):
         try:
             async for msg in self.consumer:
-                logger.info(f"Consumed from {msg.topic}: value={msg.value}")
-                await handle_event(msg.value, msg.topic)
+                try:
+                    logger.info(f"Consumed from {msg.topic}: value={msg.value}")
+                    await handle_event(msg.value, msg.topic)
+                except Exception as e:
+                    logger.error(
+                        f"Failed to process message from topic {msg.topic}: {e}",
+                        exc_info=True
+                    )
+                    # В зависимости от стратегии, здесь можно отправить
+                    # сообщение в "dead-letter-queue" или просто продолжить
         except asyncio.CancelledError:
             logger.info("Consumer task cancelled.")
         finally:

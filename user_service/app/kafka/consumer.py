@@ -4,15 +4,24 @@ import logging
 from aiokafka import AIOKafkaConsumer
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
-from app.services.notification_service import NotificationService
+from app.services.user_service import UserService
+from app.schemas.user_schemas import UserCreate
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_event(event_data: dict, event_type: str):
+async def handle_create_user_event(event_data: dict):
     async with AsyncSessionLocal() as session:
-        notification_service = NotificationService(session)
-        await notification_service.create_reminder_from_event(event_data, event_type)
+        user_service = UserService(session)
+        try:
+            user_create = UserCreate(**event_data)
+            await user_service.create_user(user_create)
+            logger.info(f"User created from Kafka event: {user_create.telegram_id}")
+        except IntegrityError:
+            logger.warning(f"User with telegram_id {event_data.get('telegram_id')} already exists. Skipping creation.")
+        except Exception as e:
+            logger.error(f"Error processing create_user event: {e}")
 
 
 class KafkaConsumer:
@@ -26,7 +35,7 @@ class KafkaConsumer:
             self.consumer = AIOKafkaConsumer(
                 *self.topics,
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-                group_id="notification_group",
+                group_id="user_service_group",
                 auto_offset_reset='earliest',
                 value_deserializer=lambda v: json.loads(v.decode('utf-8'))
             )
@@ -50,8 +59,8 @@ class KafkaConsumer:
         try:
             async for msg in self.consumer:
                 logger.info(f"Consumed from {msg.topic}: value={msg.value}")
-                if msg.topic in ["ticket_created", "music_upload_status"]:
-                    await handle_event(msg.value, msg.topic)
+                if msg.topic == "user.user.create":
+                    await handle_create_user_event(msg.value)
         except asyncio.CancelledError:
             logger.info("Consumer task cancelled.")
         finally:

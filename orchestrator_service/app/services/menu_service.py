@@ -15,7 +15,8 @@ class MenuService:
             settings.MUSIC_UPLOADER_SERVICE_URL,
         ]
         self.menu_tree = {}
-        self.client = httpx.AsyncClient(timeout=60.0)
+        self.command_map = {}
+        self.client = httpx.AsyncClient()
 
     async def _fetch_features(self, url: str):
         try:
@@ -25,6 +26,21 @@ class MenuService:
         except httpx.RequestError as e:
             logger.error(f"Failed to fetch features from {url}: {e}")
             return None
+
+    def _process_item(self, item):
+        if item.get("type") == "action" and "kafka_topic" in item:
+            topic = item["kafka_topic"]
+            command_path = topic.replace('.', '_')
+            http_url = f"/api/v1/commands/{command_path}"
+
+            self.command_map[command_path] = topic
+            item["url"] = http_url
+            item["method"] = "POST"
+            del item["kafka_topic"]
+
+        if "items" in item:
+            for sub_item in item["items"]:
+                self._process_item(sub_item)
 
     def _merge_trees(self, tree_list: list):
         merged_tree = {"name": "Главное меню", "type": "menu", "items": []}
@@ -49,11 +65,11 @@ class MenuService:
         feature_lists = await asyncio.gather(*tasks)
 
         self.menu_tree = self._merge_trees(feature_lists)
-        logger.info("Menu tree built successfully.")
-        return self.menu_tree
+        self.command_map = {}
+        self._process_item(self.menu_tree)
 
-    def get_menu_tree(self):
-        return self.menu_tree
+        logger.info(f"Menu tree built. Command map: {self.command_map}")
+        return self.menu_tree, self.command_map
 
     async def close(self):
         await self.client.aclose()

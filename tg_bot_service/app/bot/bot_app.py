@@ -1,14 +1,15 @@
 import logging
 from typing import Dict, List, Optional
-from app.core.http_client import http_client
-from app.core.config import settings
-from app.services.bot_service import bot_service
 
-from aiogram import Bot, F
-from aiogram.filters import CommandStart
+from aiogram import F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+
+from app.core.http_client import http_client
+from app.core.config import settings
+from app.services.bot_service import bot_service
+from app.kafka.producer import kafka_producer
 
 
 class ActionForm(StatesGroup):
@@ -82,16 +83,25 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
 
 async def start_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
+
+    user = message.from_user
+    if user:
+        user_data = {"telegram_id": user.id, "username": user.username or user.full_name}
+        await kafka_producer.send("user.user.create", user_data)
+
     item_names = await get_root_items()
     if item_names:
         await state.update_data(current_node=await load_schema())
         kb = build_menu_keyboard(item_names)
-        await message.answer("Выберите пункт меню:", reply_markup=kb)
+        await message.answer("Добро пожаловать! Выберите пункт меню:", reply_markup=kb)
     else:
-        await message.answer("Схема меню пуста или не найдена. Отправьте текст — я повторю его.")
+        await message.answer("Схема меню пуста или не найдена.")
 
 
 async def menu_handler(message: Message, state: FSMContext) -> None:
+    if not message.text or not message.from_user:
+        return
+
     data = await state.get_data()
     current_node = data.get("current_node", await load_schema())
 
@@ -111,7 +121,8 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
             payload = selected.get("payload", {})
             if not payload:
                 try:
-                    result = await bot_service.execute_action(selected, {})
+                    action_payload = {"telegram_id": message.from_user.id}
+                    result = await bot_service.execute_action(selected, action_payload)
                     await message.answer(f"Результат: {result}")
                 except Exception as e:
                     await message.answer(f"Ошибка выполнения действия: {e}")
@@ -143,8 +154,8 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
 
 
 async def process_action_field(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите текстовое значение.")
+    if not message.text or not message.from_user:
+        await message.answer("Произошла ошибка, попробуйте снова.")
         return
 
     data = await state.get_data()
@@ -166,6 +177,8 @@ async def process_action_field(message: Message, state: FSMContext) -> None:
             f"Введите '{field_info['description']}' ({field_info['type']}):"
         )
     else:
+        collected_data["telegram_id"] = message.from_user.id
+
         await message.answer("Все данные собраны! Выполняю действие...")
         try:
             result = await bot_service.execute_action(action, collected_data)
