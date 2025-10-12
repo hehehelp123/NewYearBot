@@ -5,7 +5,7 @@ from app.schemas.music_schemas import MusicSyncRequest
 
 class OrchestrationService:
     def __init__(self):
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(timeout=60)
 
     async def register_user(self, user_data: UserCreateRequest):
         response = await self.client.post(

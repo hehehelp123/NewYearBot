@@ -15,7 +15,7 @@ class MenuService:
             settings.MUSIC_UPLOADER_SERVICE_URL,
         ]
         self.menu_tree = {}
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(timeout=60.0)
 
     async def _fetch_features(self, url: str):
         try:
