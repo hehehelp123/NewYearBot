@@ -127,6 +127,27 @@ services:
     networks:
       - backend
 
+  selenium_edge:
+    image: selenium/standalone-edge:latest
+    container_name: selenium_edge
+    shm_size: 2g
+    entrypoint: /entrypoint.sh
+    command: /opt/bin/entry_point.sh
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+    volumes:
+      - ./selenium_downloads:/app/downloads
+      - ./edge_profile_data:/home/seluser/.config/microsoft-edge
+      - ./entrypoint.sh:/entrypoint.sh
+    networks:
+      - backend
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4444/wd/hub/status" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   tg_bot_service:
     build:
       context: ./tg_bot_service
@@ -170,8 +191,6 @@ services:
     container_name: user_service
     env_file:
       - .env
-    environment:
-      - PYTEST_ANYIO_BACKEND=asyncio
     command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002"
     ports:
       - "8002:8002"
@@ -237,10 +256,14 @@ services:
     command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8006
     ports:
       - "8006:8006"
+    volumes:
+      - ./selenium_downloads:/app/downloads
     networks:
       - backend
     depends_on:
       kafka:
+        condition: service_healthy
+      selenium_edge:
         condition: service_healthy
 
 volumes:
