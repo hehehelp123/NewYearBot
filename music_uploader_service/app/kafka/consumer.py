@@ -3,49 +3,64 @@ import json
 import logging
 from aiokafka import AIOKafkaConsumer
 from app.core.config import settings
-from app.core.db import AsyncSessionLocal
-from app.services.notification_service import NotificationService
+from app.services.sync_service import music_sync_service
+from app.schemas.music_schemas import YandexMusicSyncRequest
 
 logger = logging.getLogger(__name__)
 
-async def handle_event(event_data: dict, event_type: str):
-    async with AsyncSessionLocal() as session:
-        notification_service = NotificationService(session)
-        await notification_service.create_reminder_from_event(event_data, event_type)
+
+async def handle_sync_event(event_data: dict):
+    try:
+        sync_request = YandexMusicSyncRequest(**event_data)
+        source_url_str = str(sync_request.source_url)
+
+        if "music.yandex.ru" in source_url_str:
+            await music_sync_service._sync_with_yandex_api(source_url_str)
+        else:
+            asyncio.create_task(music_sync_service._sync_with_selenium(source_url_str, sync_request.telegram_id))
+
+        logger.info(f"Задача на синхронизацию принята для URL: {source_url_str}")
+
+    except Exception as e:
+        logger.error(f"Ошибка обработки события синхронизации: {e}")
+
 
 class KafkaConsumer:
     def __init__(self, *topics: str):
         self.topics = topics
-        self.consumer = AIOKafkaConsumer(
-            *self.topics,
-            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-            group_id="notification_group",
-            auto_offset_reset='earliest',
-            value_deserializer=lambda v: json.loads(v.decode('utf-8'))
-        )
+        self.consumer: AIOKafkaConsumer | None = None
         self._task = None
 
     async def start(self):
-        logger.info(f"Starting KafkaConsumer for topics: {self.topics}")
+        self.consumer = AIOKafkaConsumer(
+            *self.topics,
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+            group_id="music_service_group",
+            auto_offset_reset='earliest',
+            value_deserializer=lambda v: json.loads(v.decode('utf-8')),
+            # Увеличиваем таймаут сессии до 5 минут
+            session_timeout_ms=300000,
+            heartbeat_interval_ms=10000
+        )
         await self.consumer.start()
         self._task = asyncio.create_task(self._consume())
+        logger.info(f"Music Service KafkaConsumer запущен для топиков: {self.topics}")
 
     async def stop(self):
-        logger.info("Stopping KafkaConsumer...")
         if self._task:
             self._task.cancel()
-        await self.consumer.stop()
-        logger.info("KafkaConsumer stopped.")
+        if self.consumer:
+            await self.consumer.stop()
+        logger.info("Music Service KafkaConsumer остановлен.")
 
     async def _consume(self):
+        if not self.consumer: return
         try:
             async for msg in self.consumer:
-                logger.info(f"Consumed from {msg.topic}: value={msg.value}")
-                # Эта логика специфична для notification_service,
-                # в других сервисах обработчик будет свой.
-                if msg.topic in ["ticket_created", "music_upload_status"]:
-                    await handle_event(msg.value, msg.topic)
+                logger.info(f"Получена команда из {msg.topic}: value={msg.value}")
+                if msg.topic == "music.sync.start":
+                    await handle_sync_event(msg.value)
         except asyncio.CancelledError:
-            logger.info("Consumer task cancelled.")
+            logger.info("Задача консумера отменена.")
         finally:
-            logger.info("Consumer loop finished.")
+            logger.info("Цикл консумера завершен.")

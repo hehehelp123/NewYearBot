@@ -17,10 +17,8 @@ def get_wishlist_service_features():
                 {
                     "name": "Создать вишлист",
                     "type": "action",
-                    "method": "POST",
-                    "url": "/api/v1/wishlists",
+                    "kafka_topic": "wishlist.wishlist.create",
                     "payload": {
-                        "owner_user_id": {"type": "integer", "description": "ID владельца"},
                         "name": {"type": "string", "description": "Название вишлиста"}
                     }
                 }

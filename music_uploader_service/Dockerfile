@@ -11,17 +11,18 @@ RUN apt-get update && apt-get install --no-install-recommends -y curl build-esse
 RUN curl -sSL https://install.python-poetry.org | python -
 
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-root --only main
+RUN poetry install --no-root --with dev
 
 FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg
+RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg curl
+RUN pip install --no-cache-dir --upgrade pip yt-dlp
 
 ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
-ENV PATH="/opt/poetry/bin:/app/.venv/bin:$PATH"
+ENV PATH="$POETRY_HOME/bin:$PATH"
 
 COPY --from=builder /opt/poetry /opt/poetry
 COPY --from=builder /app/.venv ./.venv

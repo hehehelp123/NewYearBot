@@ -2,7 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from app.models.wishlist_models import Wishlist, WishlistItem
-from app.schemas.wishlist_schemas import WishlistCreate
+from app.schemas.wishlist_schemas import WishlistCreate, WishlistForOwner
+from app.kafka.producer import kafka_producer
 
 
 class WishlistService:
@@ -23,5 +24,11 @@ class WishlistService:
         self.db_session.add(db_wishlist)
         await self.db_session.commit()
         await self.db_session.refresh(db_wishlist)
+
+        wishlist_schema = WishlistForOwner.model_validate(db_wishlist)
+        event_payload = wishlist_schema.model_dump(mode="json")
+        event_payload["telegram_id"] = db_wishlist.owner_user_id
+
+        await kafka_producer.send("wishlist.wishlist.created", event_payload)
 
         return await self.get_wishlist_by_id(db_wishlist.wishlist_id)

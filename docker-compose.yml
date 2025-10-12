@@ -7,6 +7,7 @@ services:
       - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - backend
@@ -27,6 +28,7 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - backend
     healthcheck:
@@ -34,6 +36,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - backend
+    entrypoint: /bin/sh
+    command: /scripts/create-topics.sh
+    volumes:
+      - ./create-topics.sh:/scripts/create-topics.sh
 
   user_db:
     image: postgres:16-alpine
@@ -160,7 +175,8 @@ services:
     networks:
       - backend
     depends_on:
-      - orchestrator_service
+      orchestrator_service:
+        condition: service_started
 
   orchestrator_service:
     build:
@@ -174,8 +190,8 @@ services:
     networks:
       - backend
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
       user_service:
         condition: service_started
       wishlist_service:
@@ -183,7 +199,7 @@ services:
       ticket_service:
         condition: service_started
       music_uploader_service:
-        condition: service_started
+        condition: service_healthy
 
   user_service:
     build:
@@ -242,8 +258,8 @@ services:
     networks:
       - backend
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
       notification_db:
         condition: service_healthy
 
@@ -261,16 +277,22 @@ services:
     networks:
       - backend
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
       selenium_edge:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   user_db_data:
   wishlist_db_data:
   ticket_db_data:
   notification_db_data:
+  edge_profile_data:
 
 networks:
   backend:

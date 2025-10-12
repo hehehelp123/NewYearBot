@@ -1,22 +1,27 @@
-from fastapi import APIRouter, Request
-from app.schemas.user_schemas import UserCreateRequest
-from app.schemas.music_schemas import MusicSyncRequest
-from app.services.orchestration_service import orchestration_service
+from fastapi import APIRouter, Request, HTTPException, status
+from app.kafka.producer import kafka_producer
 
 router = APIRouter()
+
 
 @router.get("/menu")
 def get_menu(request: Request):
     return request.app.state.menu_tree
 
+
+@router.post("/commands/{command_path}")
+async def handle_command(command_path: str, payload: dict, request: Request):
+    command_map = request.app.state.command_map
+    topic = command_map.get(command_path)
+
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Command not found")
+
+    await kafka_producer.send(topic, payload)
+
+    return {"status": "accepted", "detail": f"Command for topic '{topic}' has been accepted."}
+
+
 @router.get("/")
 def read_root():
     return {"service": "Orchestrator Service", "status": "ok"}
-
-@router.post("/users/")
-async def register_user(user: UserCreateRequest):
-    return await orchestration_service.register_user(user)
-
-@router.post("/music/sync")
-async def sync_music(payload: MusicSyncRequest):
-    return await orchestration_service.sync_yandex_music(payload)
