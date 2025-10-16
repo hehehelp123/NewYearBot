@@ -50,6 +50,42 @@ services:
     volumes:
       - ./create-topics.sh:/scripts/create-topics.sh
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  create-minio-bucket:
+    image: minio/mc
+    container_name: create-minio-bucket
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      /usr/bin/mc mb myminio/${MINIO_BUCKET} --ignore-existing;
+      /usr/bin/mc policy set public myminio/${MINIO_BUCKET};
+      exit 0;
+      "
+    networks:
+      - backend
+
   user_db:
     image: postgres:16-alpine
     container_name: user_db
@@ -210,6 +246,8 @@ services:
     command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002"
     ports:
       - "8002:8002"
+    volumes:
+      - ./user_service/alembic/versions:/app/alembic/versions
     networks:
       - backend
     depends_on:
@@ -225,6 +263,8 @@ services:
     command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8003"
     ports:
       - "8003:8003"
+    volumes:
+      - ./wishlist_service/alembic/versions:/app/alembic/versions
     networks:
       - backend
     depends_on:
@@ -240,11 +280,15 @@ services:
     command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8004"
     ports:
       - "8004:8004"
+    volumes:
+      - ./ticket_service/alembic/versions:/app/alembic/versions
     networks:
       - backend
     depends_on:
       ticket_db:
         condition: service_healthy
+      create-minio-bucket:
+        condition: service_completed_successfully
 
   notification_service:
     build:
@@ -255,6 +299,8 @@ services:
     command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8005"
     ports:
       - "8005:8005"
+    volumes:
+      - ./notification_service/alembic/versions:/app/alembic/versions
     networks:
       - backend
     depends_on:
@@ -293,6 +339,7 @@ volumes:
   ticket_db_data:
   notification_db_data:
   edge_profile_data:
+  minio_data:
 
 networks:
   backend:

@@ -1,8 +1,4 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.db import get_db
-from app.schemas.ticket_schemas import Ticket, TicketCreate
-from app.services.ticket_service import TicketService
+from fastapi import APIRouter
 
 router = APIRouter()
 
@@ -10,18 +6,23 @@ router = APIRouter()
 def get_ticket_service_features():
     return [
         {
-            "name": "Поддержка",
+            "name": "Мои билеты",
             "type": "menu",
             "items": [
                 {
-                    "name": "Создать тикет",
+                    "name": "Добавить билет",
                     "type": "action",
                     "method": "POST",
                     "url": "/api/v1/tickets",
                     "payload": {
-                        "requester_user_id": {"type": "integer", "description": "ID пользователя, создающего тикет"},
-                        "title": {"type": "string", "description": "Тема обращения"}
+                        "title": {"type": "string", "description": "Название поездки (например, 'Москва - Сочи')"},
+                        "file": {"type": "file", "description": "PDF файл билета"}
                     }
+                },
+                {
+                    "name": "Посмотреть билеты",
+                    "type": "action",
+                    "kafka_topic": "ticket.list.request"
                 }
             ]
         }
@@ -30,8 +31,3 @@ def get_ticket_service_features():
 @router.get("/")
 def read_root():
     return {"service": "Ticket Service", "status": "ok"}
-
-@router.post("/tickets/", response_model=Ticket)
-async def create_ticket(ticket: TicketCreate, db: AsyncSession = Depends(get_db)):
-    ticket_service = TicketService(db)
-    return await ticket_service.create_ticket(ticket)

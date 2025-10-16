@@ -13,49 +13,44 @@ class BotService:
                 f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getMe"
             )
             response.raise_for_status()
-
             data = response.json()
             if not data.get("ok") or not data.get("result"):
-                logging.error("Health check failed: Invalid response from Telegram API")
                 return HealthCheckResponse(status="error", message="Invalid Telegram API response")
-
-            logging.info("Bot health check successful")
             return HealthCheckResponse(
                 status="healthy",
                 message="Bot is operational",
                 bot_id=data["result"].get("id"),
                 username=data["result"].get("username")
             )
-
         except Exception as e:
-            logging.error(f"Health check failed: {str(e)}")
             return HealthCheckResponse(status="error", message=f"Health check failed: {str(e)}")
 
-    async def execute_action(self, action: dict, collected_data: dict) -> dict:
+    async def execute_action(self, action: dict, collected_data: dict) -> dict | bytes:
         url = f"{settings.ORCHESTRATOR_URL}{action['url']}"
         method = action['method'].upper()
 
-        request_map = {
-            "POST": http_client.client.post,
-            "GET": http_client.client.get,
-            "PUT": http_client.client.put,
-            "DELETE": http_client.client.delete,
-        }
+        download_file = collected_data.pop('__download_file__', False)
 
-        request_func = request_map.get(method)
+        request_func = getattr(http_client.client, method.lower(), None)
         if not request_func:
             return {"error": f"Unsupported method: {method}"}
 
-        logging.info(f"Executing action: {method} {url} with payload {collected_data}")
-
         kwargs = {}
-        if method in ["POST", "PUT"]:
+        files_to_send = collected_data.pop('__files__', None)
+
+        if files_to_send:
+            kwargs['data'] = collected_data
+            kwargs['files'] = files_to_send
+        elif method in ["POST", "PUT"]:
             kwargs['json'] = collected_data
         else:
             kwargs['params'] = collected_data
 
         response = await request_func(url, **kwargs)
         response.raise_for_status()
+
+        if download_file:
+            return response.content
         return response.json()
 
 
