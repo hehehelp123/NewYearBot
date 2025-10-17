@@ -106,8 +106,8 @@ class KafkaBotConsumer:
             text = (
                 f"*{escape_markdown(ticket['title'])}*\n\n"
                 f"Пассажир: *{escape_markdown(ticket.get('passenger_name') or 'н/д')}*\n"
-                f"Поезд: *{escape_markdown(ticket.get('train_number') or 'н/д')}* | "
-                f"Вагон: *{escape_markdown(ticket.get('wagon_number') or 'н/д')}* | "
+                f"Поезд: *{escape_markdown(ticket.get('train_number') or 'н/д')}* \\| "
+                f"Вагон: *{escape_markdown(ticket.get('wagon_number') or 'н/д')}* \\| "
                 f"Место: *{escape_markdown(ticket.get('seat_number') or 'н/д')}*\n\n"
                 f"📍 *Отправление:* {escape_markdown(ticket.get('departure_station') or 'н/д')}\n"
                 f"   {format_dt(ticket.get('departure_datetime'))}\n"

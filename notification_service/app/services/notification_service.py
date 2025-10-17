@@ -25,8 +25,10 @@ class NotificationService:
 
     async def create_and_send_notification(self, event_data: dict, event_type: str):
         chat_id = event_data.get("telegram_id")
-        if not chat_id:
-            return
+        if not chat_id and event_type not in ["ticket.list.retrieved"]:
+             chat_id = event_data.get("chat_id")
+             if not chat_id:
+                return
 
         if event_type == "user.user.created":
             username = escape_markdown(event_data.get("username", "Anonymous"))
@@ -98,7 +100,10 @@ class NotificationService:
         await self._send_immediate(user_id, reminders_info)
 
     async def _handle_ticket_list(self, data: dict):
-        payload = {"chat_id": data["telegram_id"], "tickets": data["tickets"]}
+        user_id = data.get("telegram_id")
+        tickets = data.get("tickets", [])
+        logger.info(f"Passing ticket list for user {user_id} to bot consumer.")
+        payload = {"chat_id": user_id, "tickets": tickets}
         await kafka_producer.send("notification.send.tickets", payload)
 
     async def _schedule_text_reminder(self, user_id: int, ticket: dict, send_at: datetime, time_left: str):

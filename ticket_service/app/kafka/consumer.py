@@ -18,7 +18,7 @@ async def handle_event(event_data: dict, topic: str):
         if topic == "ticket.create.requested":
             await service.process_ticket_creation_request(event_data)
         elif topic == "ticket.list.request" and user_id:
-            await service.send_active_tickets_list(user_id)
+            await service.publish_active_tickets_list(user_id)
         elif topic == "ticket.download.request" and user_id and ticket_id:
             await service.send_ticket_document(user_id, ticket_id)
         elif topic == "ticket.delete.request" and user_id and ticket_id:

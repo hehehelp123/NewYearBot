@@ -37,4 +37,13 @@ class StorageService:
             logger.error(f"Failed to download file {object_name}: {e}", exc_info=True)
             return False
 
+    def delete_file(self, object_name: str):
+        try:
+            self.client.remove_object(settings.MINIO_BUCKET, object_name)
+            logger.info(f"File {object_name} deleted successfully from bucket {settings.MINIO_BUCKET}.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete file {object_name}: {e}", exc_info=True)
+            return False
+
 storage_service = StorageService()
