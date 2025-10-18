@@ -76,6 +76,21 @@ class MusicSyncService:
     def stop(self):
         logger.info("MusicSyncService остановлен.")
 
+    async def process_sync_request(self, payload: dict):
+        source_url = payload.get("source_url")
+        user_id = payload.get("telegram_id")
+
+        if not source_url or not user_id:
+            logger.error(f"Некорректные данные для синхронизации: {payload}")
+            return
+
+        logger.info(f"Получен запрос на синхронизацию для пользователя {user_id} с URL: {source_url}")
+
+        if "music.yandex.ru" in source_url:
+            asyncio.create_task(self._sync_with_yandex_api(source_url, user_id))
+        else:
+            asyncio.create_task(self._sync_with_selenium(source_url, user_id))
+
     async def _sync_with_selenium(self, source_url: str, user_id: int):
         logger.info(f"Фоновая задача для {source_url} ожидает доступа к Selenium...")
         async with self.selenium_lock:
@@ -111,19 +126,20 @@ class MusicSyncService:
                                            "reason": "Critical error in sync task"})
         logger.info(f"Задача для {source_url} завершена, доступ к Selenium освобожден.")
 
-    async def _sync_with_yandex_api(self, source_url: str) -> dict:
+    async def _sync_with_yandex_api(self, source_url: str, user_id: int):
         logger.info(f"Запуск синхронизации через Yandex API для {source_url}")
 
         destination_playlist = await self.yandex_manager.find_playlist_by_name(
             settings.YANDEX_DESTINATION_PLAYLIST_NAME)
         if not destination_playlist:
-            return {"status": "error", "detail": "Плейлист назначения не найден."}
+            await kafka_producer.send("yandex.upload.failed",
+                                      {"user_id": user_id, "telegram_id": user_id, "source_url": source_url,
+                                       "reason": "Плейлист назначения не найден"})
+            return
 
         track_match = re.search(r"music\.yandex\.ru/album/(\d+)/track/(\d+)", source_url)
         user_playlist_match = re.search(r"music\.yandex\.ru/users/(.+)/playlists/(\d+)", source_url)
-        editorial_playlist_match = re.search(r"music\.yandex\.ru/playlists/", source_url)
 
-        source_playlist = None
         source_tracks = []
 
         if track_match:
@@ -132,22 +148,14 @@ class MusicSyncService:
         elif user_playlist_match:
             owner, kind = user_playlist_match.groups()
             source_playlist = await self.yandex_manager.client.users_playlists(kind, owner)
-        elif editorial_playlist_match:
-            try:
-                chart_info = await self.yandex_manager.client.chart()
-                if chart_info and chart_info.chart:
-                    source_playlist = chart_info.chart
-            except Exception as e:
-                logger.error(f"Не удалось получить чарт: {e}")
-
-        if source_playlist and not source_tracks:
-            if hasattr(source_playlist, 'tracks') and source_playlist.tracks:
+            if source_playlist and hasattr(source_playlist, 'tracks') and source_playlist.tracks:
                 source_tracks = [t.track for t in source_playlist.tracks if t.track]
-            elif hasattr(source_playlist, 'track_ids'):
-                source_tracks = await self.yandex_manager.client.tracks(source_playlist.track_ids)
 
         if not source_tracks:
-            return {"status": "error", "detail": "URL не распознан или не удалось получить треки."}
+            await kafka_producer.send("yandex.upload.failed",
+                                      {"user_id": user_id, "telegram_id": user_id, "source_url": source_url,
+                                       "reason": "URL не распознан или не удалось получить треки"})
+            return
 
         await destination_playlist.fetch_tracks_async()
         dest_track_ids = {track.track.id for track in destination_playlist.tracks if track.track}
@@ -155,20 +163,23 @@ class MusicSyncService:
         tracks_to_add = [track for track in source_tracks if track and track.id not in dest_track_ids]
 
         if not tracks_to_add:
-            return {"status": "success", "added_tracks": 0, "detail": "Синхронизация не требуется."}
+            logger.info(f"Синхронизация для {source_url} не требуется, треки уже есть.")
+            return
 
         success = await self.yandex_manager.add_tracks_to_playlist(destination_playlist, tracks_to_add)
+        event_payload = {
+            "user_id": user_id,
+            "telegram_id": user_id,
+            "source_url": source_url,
+            "added_count": len(tracks_to_add),
+            "destination_playlist": destination_playlist.title
+        }
 
         if success:
-            event_payload = {
-                "source_url": source_url,
-                "added_count": len(tracks_to_add),
-                "destination_playlist": destination_playlist.title
-            }
-            await kafka_producer.send("yandex_music_synced", event_payload)
-            return {"status": "success", "added_tracks": len(tracks_to_add)}
+            await kafka_producer.send("yandex.upload.success", event_payload)
         else:
-            return {"status": "error", "detail": "Ошибка при добавлении треков."}
+            await kafka_producer.send("yandex.upload.failed",
+                                      {"reason": "Ошибка при добавлении треков", **event_payload})
 
 
 music_sync_service = MusicSyncService()

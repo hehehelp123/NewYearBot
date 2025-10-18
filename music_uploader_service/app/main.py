@@ -2,32 +2,25 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.api.v1.routers import router
-from app.kafka.producer import kafka_producer
-from app.kafka.consumer import KafkaConsumer
+from app.kafka.consumer import music_kafka_consumer
 from app.services.sync_service import music_sync_service
 
-logger = logging.getLogger(__name__)
-
-consumer = KafkaConsumer("music.sync.start")
-
+logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Запуск music_uploader_service...")
-    await kafka_producer.start()
-    await consumer.start()
-    try:
-        await music_sync_service.start()
-    except Exception as e:
-        logger.error(f"Критическая ошибка при инициализации Music Sync Service: {e}")
-
+    logging.info("Music Uploader Service starting up...")
+    await music_sync_service.start()
+    await music_kafka_consumer.start()
     yield
-
-    await kafka_producer.stop()
-    await consumer.stop()
+    logging.info("Music Uploader Service shutting down...")
+    await music_kafka_consumer.stop()
     music_sync_service.stop()
-    logger.info("Остановка music_uploader_service.")
 
+app = FastAPI(
+    title="Music Uploader Service",
+    description="Service for downloading and uploading music from various sources.",
+    lifespan=lifespan
+)
 
-app = FastAPI(title="Music Uploader Service", lifespan=lifespan)
 app.include_router(router, prefix="/api/v1")
