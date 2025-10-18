@@ -1,37 +1,54 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.db import get_db
-from app.schemas.ticket_schemas import Ticket, TicketCreate
-from app.services.ticket_service import TicketService
+from fastapi import APIRouter
 
 router = APIRouter()
 
+
 @router.get("/features")
-def get_ticket_service_features():
-    return [
+def get_features():
+    hidden_commands = [
         {
-            "name": "Поддержка",
+            "name": "Download Ticket",
+            "type": "action",
+            "kafka_topic": "ticket.download.request"
+        },
+        {
+            "name": "Delete Ticket",
+            "type": "action",
+            "kafka_topic": "ticket.delete.request"
+        }
+    ]
+
+    visible_menu = [
+        {
+            "name": "Билеты",
             "type": "menu",
             "items": [
                 {
-                    "name": "Создать тикет",
+                    "name": "Посмотреть билеты",
                     "type": "action",
-                    "method": "POST",
-                    "url": "/api/v1/tickets",
+                    "kafka_topic": "ticket.list.request"
+                },
+                {
+                    "name": "Добавить билет",
+                    "type": "action",
                     "payload": {
-                        "requester_user_id": {"type": "integer", "description": "ID пользователя, создающего тикет"},
-                        "title": {"type": "string", "description": "Тема обращения"}
-                    }
+                        "title": {
+                            "description": "Название поездки",
+                            "type": "text"
+                        },
+                        "ticket_file": {
+                            "description": "PDF файл билета",
+                            "type": "file"
+                        }
+                    },
+                    "url": "/api/v1/tickets",
+                    "method": "POST"
                 }
             ]
         }
     ]
 
-@router.get("/")
-def read_root():
-    return {"service": "Ticket Service", "status": "ok"}
-
-@router.post("/tickets/", response_model=Ticket)
-async def create_ticket(ticket: TicketCreate, db: AsyncSession = Depends(get_db)):
-    ticket_service = TicketService(db)
-    return await ticket_service.create_ticket(ticket)
+    return {
+        "menu": visible_menu,
+        "commands": hidden_commands
+    }

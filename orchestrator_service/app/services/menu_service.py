@@ -27,20 +27,25 @@ class MenuService:
             logger.error(f"Failed to fetch features from {url}: {e}")
             return None
 
-    def _process_item(self, item):
+    def _process_item_for_command_map(self, item):
         if item.get("type") == "action" and "kafka_topic" in item:
             topic = item["kafka_topic"]
             command_path = topic.replace('.', '_')
-            http_url = f"/api/v1/commands/{command_path}"
-
             self.command_map[command_path] = topic
-            item["url"] = http_url
-            item["method"] = "POST"
-            del item["kafka_topic"]
 
         if "items" in item:
             for sub_item in item["items"]:
-                self._process_item(sub_item)
+                self._process_item_for_command_map(sub_item)
+
+    def _process_item_for_bot_menu(self, item):
+        if item.get("type") == "action" and "kafka_topic" in item:
+            command_path = item["kafka_topic"].replace('.', '_')
+            item["url"] = f"/api/v1/commands/{command_path}"
+            item["method"] = "POST"
+
+        if "items" in item:
+            for sub_item in item["items"]:
+                self._process_item_for_bot_menu(sub_item)
 
     def _merge_trees(self, tree_list: list):
         merged_tree = {"name": "Главное меню", "type": "menu", "items": []}
@@ -60,13 +65,33 @@ class MenuService:
         return merged_tree
 
     async def build_menu_tree(self):
-        logger.info("Building menu tree...")
+        logger.info("Building menu tree and command map...")
         tasks = [self._fetch_features(url) for url in self.service_urls]
-        feature_lists = await asyncio.gather(*tasks)
+        feature_responses = await asyncio.gather(*tasks)
 
-        self.menu_tree = self._merge_trees(feature_lists)
+        all_menu_parts = []
+        all_command_parts = []
+
+        for response in feature_responses:
+            if not response:
+                continue
+
+            if isinstance(response, dict) and "menu" in response:
+                all_menu_parts.append(response["menu"])
+                all_command_parts.extend(response.get("commands", []))
+            elif isinstance(response, list):
+                all_menu_parts.append(response)
+
         self.command_map = {}
-        self._process_item(self.menu_tree)
+        for menu_part in all_menu_parts:
+            for item in menu_part:
+                self._process_item_for_command_map(item)
+        for command in all_command_parts:
+            self._process_item_for_command_map(command)
+
+        self.menu_tree = self._merge_trees(all_menu_parts)
+
+        self._process_item_for_bot_menu(self.menu_tree)
 
         logger.info(f"Menu tree built. Command map: {self.command_map}")
         return self.menu_tree, self.command_map

@@ -10,10 +10,19 @@ class Ticket(Base):
     requester_user_id = Column(Integer, nullable=False)
     title = Column(String, nullable=False)
     status = Column(String, nullable=False, default='open')
-    event_date = Column(DateTime, nullable=True)
+    storage_key = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    comments = relationship("TicketComment", back_populates="ticket")
 
+    passenger_name = Column(String, nullable=True)
+    train_number = Column(String, nullable=True)
+    wagon_number = Column(String, nullable=True)
+    seat_number = Column(String, nullable=True)
+    departure_station = Column(String, nullable=True)
+    departure_datetime = Column(DateTime, nullable=True)
+    arrival_station = Column(String, nullable=True)
+    arrival_datetime = Column(DateTime, nullable=True)
+
+    comments = relationship("TicketComment", back_populates="ticket")
 
 class TicketComment(Base):
     __tablename__ = 'ticket_comments'
