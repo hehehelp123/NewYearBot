@@ -178,19 +178,16 @@ services:
     networks:
       - backend
 
-  selenium_edge:
-    image: selenium/standalone-edge:latest
-    container_name: selenium_edge
+  selenium_firefox:
+    image: selenium/standalone-firefox:latest
+    container_name: selenium_firefox
     shm_size: 2g
-    entrypoint: /entrypoint.sh
-    command: /opt/bin/entry_point.sh
     ports:
       - "4444:4444"
       - "7900:7900"
     volumes:
       - ./selenium_downloads:/app/downloads
-      - ./edge_profile_data:/home/seluser/.config/microsoft-edge
-      - ./entrypoint.sh:/entrypoint.sh
+      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile.default
     networks:
       - backend
     healthcheck:
@@ -325,7 +322,7 @@ services:
     depends_on:
       kafka-setup:
         condition: service_completed_successfully
-      selenium_edge:
+      selenium_firefox:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
@@ -338,7 +335,7 @@ volumes:
   wishlist_db_data:
   ticket_db_data:
   notification_db_data:
-  edge_profile_data:
+  firefox_profile_data:
   minio_data:
 
 networks:

@@ -103,10 +103,10 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         return
 
     if selected.get("type") == "action":
-        if "kafka_topic" in selected:
-            await process_kafka_action(selected, message, state)
-        elif "payload" in selected:
+        if "payload" in selected:
             await start_form_action(selected, message, state)
+        elif "kafka_topic" in selected:
+            await process_kafka_action(selected, message, state)
 
 async def process_kafka_action(action: dict, message: Message, state: FSMContext):
     await message.answer("Ваш запрос принят в обработку...")
