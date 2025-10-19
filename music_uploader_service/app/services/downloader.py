@@ -11,6 +11,17 @@ logger = logging.getLogger(__name__)
 DOWNLOAD_PATH = "/app/downloads"
 COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies.txt")
 
+# Создаем кастомный логгер для yt-dlp, чтобы он использовал наш стандартный логгинг
+class YtdlpLogger:
+    def debug(self, msg):
+        logger.debug(msg)
+
+    def warning(self, msg):
+        logger.warning(msg)
+
+    def error(self, msg):
+        logger.error(msg)
+
 
 async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, str]]:
     if not os.path.exists(DOWNLOAD_PATH):
@@ -22,12 +33,13 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
             total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
             if total_bytes:
                 percentage = d['downloaded_bytes'] * 100 / total_bytes
-                logger.info(f"Скачивание... {percentage:.1f}%")
+                logger.info(f"Скачивание... {percentage:.1f}% из {total_bytes / (1024*1024):.1f}МБ")
         elif d['status'] == 'finished':
             logger.info("Скачивание завершено, начинается пост-обработка...")
         elif d['status'] == 'error':
             logger.error("Ошибка в хуке yt-dlp.")
 
+        # Уровень DEBUG для полного словаря, чтобы не засорять логи по умолчанию
         logger.debug(f"Полный словарь хука: {pformat(d)}")
 
     ydl_opts = {
@@ -38,11 +50,12 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         'progress_hooks': [logging_progress_hook],
         'sleep_interval': 3,
         'max_sleep_interval': 10,
-        'ignoreerrors': True,
+        'ignoreerrors': False, # Изменено на False, чтобы yt-dlp пробрасывал ошибки
         'retries': 10,
         'fragment_retries': 10,
-        # === ДОБАВЛЕНО: Увеличиваем таймаут ожидания ответа от сервера ===
-        'socket_timeout': 120,
+        'socket_timeout': 120, # Увеличили до 2 минут
+        'verbose': True,       # <--- ГЛАВНОЕ ИЗМЕНЕНИЕ: Включаем подробный режим
+        'logger': YtdlpLogger(), # <--- Используем наш логгер
     }
 
     if user_agent:
