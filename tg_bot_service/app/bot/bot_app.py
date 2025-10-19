@@ -121,14 +121,34 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
 async def start_form_action(action: dict, message: Message, state: FSMContext):
     payload_schema = action.get("payload", {})
     fields = list(payload_schema.keys())
-    await state.set_state(ActionForm.waiting_for_field)
-    await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
-    field_name = fields[0]
-    field_info = payload_schema[field_name]
-    await message.answer(
-        f"Введите '{field_info['description']}' ({field_info['type']}):",
-        reply_markup=build_menu_keyboard([], add_start=True)
-    )
+
+    if not fields:
+        collected_data = {}
+        if message.from_user:
+            collected_data["telegram_id"] = message.from_user.id
+
+        await message.answer("Выполняю запрос...")
+
+        try:
+            kafka_topic = action.get("kafka_topic")
+            if not kafka_topic:
+                raise ValueError("В схеме не указан kafka_topic для этого действия")
+
+            await kafka_producer.send(kafka_topic, collected_data)
+        except Exception as e:
+            logging.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
+            await message.answer(f"Ошибка: {e}")
+        finally:
+            await reset_to_main_menu(message, state)
+    else:
+        await state.set_state(ActionForm.waiting_for_field)
+        await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
+        field_name = fields[0]
+        field_info = payload_schema[field_name]
+        await message.answer(
+            f"Введите '{field_info['description']}' ({field_info['type']}):",
+            reply_markup=build_menu_keyboard([], add_start=True)
+        )
 
 
 async def process_action_field(message: Message, state: FSMContext, bot: Bot):
