@@ -27,9 +27,11 @@ async def lifespan(app: FastAPI):
             await kafka_producer.start()
             await consumer.start()
             logging.info("✅ Kafka producer and consumer started successfully.")
+            break
         except KafkaConnectionError as e:
-            if kafka_producer._running:
+            if kafka_producer._is_running:
                 await kafka_producer.stop()
+
             if i + 1 == max_retries:
                 logging.error(f"❌ Could not connect to Kafka after all retries. Error: {e}. Exiting.")
                 raise
