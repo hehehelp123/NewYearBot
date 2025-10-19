@@ -158,3 +158,50 @@ class TicketService:
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+
+async def process_ticket_list_request(self, event_data: dict):
+    telegram_id = event_data.get("telegram_id")
+    if not telegram_id:
+        logger.warning(f"Received ticket list request with no telegram_id: {event_data}")
+        return
+
+    try:
+        query = (
+            select(Ticket)
+            .where(
+                Ticket.requester_user_id == telegram_id,
+                Ticket.departure_datetime >= datetime.utcnow()
+            )
+            .order_by(Ticket.departure_datetime.asc())
+        )
+        result = await self.db_session.execute(query)
+        tickets = result.scalars().all()
+
+        ticket_list_for_kafka = [
+            {
+                "id": ticket.ticket_id,
+                "title": ticket.title,
+                "passenger_name": ticket.passenger_name,
+                "train_number": ticket.train_number,
+                "wagon_number": ticket.wagon_number,
+                "seat_number": ticket.seat_number,
+                "departure_station": ticket.departure_station,
+                "departure_datetime": ticket.departure_datetime.isoformat() if ticket.departure_datetime else None,
+                "arrival_station": ticket.arrival_station,
+                "arrival_datetime": ticket.arrival_datetime.isoformat() if ticket.arrival_datetime else None,
+            } for ticket in tickets
+        ]
+
+        response_payload = {"chat_id": telegram_id, "tickets": ticket_list_for_kafka}
+
+        await kafka_producer.send("notification.send.tickets", response_payload)
+        logger.info(f"Successfully sent ticket list for user {telegram_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to process ticket list request for user {telegram_id}: {e}", exc_info=True)
+        error_message = {
+            "chat_id": telegram_id,
+            "text": "Произошла ошибка при получении списка билетов\\."
+        }
+        await kafka_producer.send("notification.send", error_message)
