@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI):
         try:
             logging.info(f"Attempt {i + 1}/{max_retries} to connect to Kafka...")
             await kafka_producer.start()
+            await consumer.start()
+            logger.info("Scheduling background task for cookie export.")
+            asyncio.create_task(selenium_downloader.run_cookie_export_background())
             logging.info("✅ Kafka producer started successfully.")
             break
         except KafkaConnectionError as e:
