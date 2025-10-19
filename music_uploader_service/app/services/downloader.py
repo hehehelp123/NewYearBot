@@ -41,6 +41,8 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         'ignoreerrors': True,
         'retries': 10,
         'fragment_retries': 10,
+        # === ДОБАВЛЕНО: Увеличиваем таймаут ожидания ответа от сервера ===
+        'socket_timeout': 120,
     }
 
     if user_agent:
