@@ -52,7 +52,7 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         'socket_timeout': 120,
         'logger': YtdlpLogger(),
         'verbose': True,
-        # === ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: Принудительно использовать IPv4 ===
+        # === THE FIX: Force the use of IPv4 for all connections ===
         'source_address': '0.0.0.0',
     }
 
