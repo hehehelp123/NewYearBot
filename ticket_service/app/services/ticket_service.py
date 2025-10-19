@@ -14,11 +14,13 @@ from app.services.pdf_parser import parse_rzd_ticket
 
 logger = logging.getLogger(__name__)
 
+
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str):
         return ""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f"({escape_chars})", r"\\\1", text)
+
 
 class TicketService:
     def __init__(self, db_session: AsyncSession):
@@ -52,7 +54,7 @@ class TicketService:
             })
 
         message = {"telegram_id": user_id, "tickets": ticket_list_for_kafka}
-        await kafka_producer.send("ticket.list.retrieved", message)
+        await kafka_producer.send("notification.send.tickets", message)
 
     async def send_ticket_document(self, user_id: int, ticket_id: int):
         ticket = await self.get_ticket_by_id(ticket_id)
@@ -82,7 +84,10 @@ class TicketService:
 
         title = escape_markdown(ticket.title)
         if ticket.storage_key:
-            storage_service.delete_file(ticket.storage_key)
+            try:
+                storage_service.delete_file(ticket.storage_key)
+            except Exception as e:
+                logger.error(f"Could not delete file {ticket.storage_key} from MinIO: {e}", exc_info=True)
 
         await self.db_session.delete(ticket)
         await self.db_session.commit()
@@ -97,15 +102,22 @@ class TicketService:
         return result.scalar_one_or_none()
 
     async def process_ticket_creation_request(self, event_data: dict):
-        storage_key = event_data["storage_key"]
-        title = event_data["title"]
-        telegram_id = event_data["telegram_id"]
+        storage_key = event_data.get("ticket_file")
+        title = event_data.get("title")
+        telegram_id = event_data.get("telegram_id")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp_path = tmp.name
+        if not all([storage_key, title, telegram_id]):
+            logger.error(f"Missing required fields in ticket creation event: {event_data}")
+            return
 
+        tmp_path = None
         try:
-            storage_service.download_file(storage_key, tmp_path)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp_path = tmp.name
+
+            logger.info(f"Downloading file {storage_key} to temporary path {tmp_path}")
+            storage_service.download_file_to_path(storage_key, tmp_path)
+
             with open(tmp_path, "rb") as f:
                 parsed_data = parse_rzd_ticket(f)
 
@@ -121,21 +133,18 @@ class TicketService:
             logger.info(f"Ticket {db_ticket.ticket_id} created for user {telegram_id}.")
 
             event_payload = {
-                "telegram_id": telegram_id,
-                "ticket_id": db_ticket.ticket_id,
-                "title": db_ticket.title,
-                "passenger_name": db_ticket.passenger_name,
-                "train_number": db_ticket.train_number,
-                "wagon_number": db_ticket.wagon_number,
-                "seat_number": db_ticket.seat_number,
-                "departure_station": db_ticket.departure_station,
-                "departure_datetime": db_ticket.departure_datetime.isoformat() if db_ticket.departure_datetime else None,
-                "arrival_station": db_ticket.arrival_station,
-                "arrival_datetime": db_ticket.arrival_datetime.isoformat() if db_ticket.arrival_datetime else None,
-                "storage_key": db_ticket.storage_key
+                "chat_id": telegram_id,
+                "text": f"✅ Ваш билет *{escape_markdown(db_ticket.title)}* успешно обработан и сохранен\\."
             }
-            await kafka_producer.send("ticket.created", event_payload)
+            await kafka_producer.send("notification.send", event_payload)
 
+        except Exception as e:
+            logger.error(f"Failed to process ticket creation for user {telegram_id}: {e}", exc_info=True)
+            error_message = {
+                "chat_id": telegram_id,
+                "text": "Произошла ошибка при обработке вашего билета\\. Пожалуйста, попробуйте еще раз\\."
+            }
+            await kafka_producer.send("notification.send", error_message)
         finally:
-            if os.path.exists(tmp_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
