@@ -31,6 +31,7 @@ def get_features():
                 {
                     "name": "Добавить билет",
                     "type": "action",
+                    "kafka_topic": "ticket.create.requested",
                     "payload": {
                         "title": {
                             "description": "Название поездки",
@@ -40,9 +41,7 @@ def get_features():
                             "description": "PDF файл билета",
                             "type": "file"
                         }
-                    },
-                    "url": "/api/v1/tickets",
-                    "method": "POST"
+                    }
                 }
             ]
         }
