@@ -74,6 +74,7 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     if user:
         user_data = {"telegram_id": user.id, "username": user.username or user.full_name}
         await kafka_producer.send("user.user.create", user_data)
+        await kafka_producer.send("wishlist.wishlist.create", user_data)
     item_names = await get_root_items()
     if item_names:
         await state.update_data(current_node=await load_schema())

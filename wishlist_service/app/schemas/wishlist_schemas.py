@@ -1,10 +1,22 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, HttpUrl
+
+class WishlistAddRequest(BaseModel):
+    source_url: HttpUrl
+    telegram_id: int
 
 # --- Booking Schemas ---
 class ItemBookingInfo(BaseModel):
     booked_by_user_id: int
     booked_at: datetime
+
+class ItemBookRequest(BaseModel):
+    item_id: int
+    booker_user_id: int
+
+class WishlistGetRequest(BaseModel):
+    owner_user_id: int
+    requester_user_id: int
 
 # --- Item Schemas ---
 class WishlistItemBase(BaseModel):

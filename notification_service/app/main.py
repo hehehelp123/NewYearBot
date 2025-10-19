@@ -14,7 +14,10 @@ async def lifespan(app: FastAPI):
         "ticket.created",
         "ticket.list.retrieved",
         "notification.schedule",
-        "notification.schedule.document"
+        "notification.schedule.document",
+        "ticket.ticket.created",
+        #"selenium.upload.success",
+        #"wishlist.wishlist.created"
     )
     await consumer.start()
     scheduler_task = start_scheduler()

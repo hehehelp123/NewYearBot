@@ -15,13 +15,13 @@ def get_wishlist_service_features():
             "type": "menu",
             "items": [
                 {
-                    "name": "Создать вишлист",
+                    "name": "Добавить в вишлист",
                     "type": "action",
-                    "kafka_topic": "wishlist.wishlist.create",
+                    "kafka_topic": "wishlist.wishlist.add",
                     "payload": {
-                        "name": {"type": "string", "description": "Название вишлиста"}
+                        "source_url": {"type": "string", "description": "Ссылка на товар озон"}
                     }
-                }
+                },
             ]
         }
     ]
