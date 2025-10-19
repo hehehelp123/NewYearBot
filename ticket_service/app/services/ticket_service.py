@@ -132,11 +132,21 @@ class TicketService:
             await self.db_session.refresh(db_ticket)
             logger.info(f"Ticket {db_ticket.ticket_id} created for user {telegram_id}.")
 
-            event_payload = {
-                "chat_id": telegram_id,
-                "text": f"✅ Ваш билет *{escape_markdown(db_ticket.title)}* успешно обработан и сохранен\\."
+            ticket_payload = {
+                "telegram_id": db_ticket.requester_user_id,
+                "ticket_id": db_ticket.ticket_id,
+                "title": db_ticket.title,
+                "passenger_name": db_ticket.passenger_name,
+                "train_number": db_ticket.train_number,
+                "wagon_number": db_ticket.wagon_number,
+                "seat_number": db_ticket.seat_number,
+                "departure_station": db_ticket.departure_station,
+                "departure_datetime": db_ticket.departure_datetime.isoformat() if db_ticket.departure_datetime else None,
+                "arrival_station": db_ticket.arrival_station,
+                "arrival_datetime": db_ticket.arrival_datetime.isoformat() if db_ticket.arrival_datetime else None,
+                "storage_key": db_ticket.storage_key,
             }
-            await kafka_producer.send("notification.send", event_payload)
+            await kafka_producer.send("ticket.created", ticket_payload)
 
         except Exception as e:
             logger.error(f"Failed to process ticket creation for user {telegram_id}: {e}", exc_info=True)
