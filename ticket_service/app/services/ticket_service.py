@@ -46,7 +46,7 @@ class TicketService:
 
             ticket_list_for_kafka = [
                 {
-                    "id": ticket.ticket_id,
+                    "ticket_id": ticket.ticket_id,
                     "title": ticket.title,
                     "passenger_name": ticket.passenger_name,
                     "train_number": ticket.train_number,
@@ -59,7 +59,7 @@ class TicketService:
                 } for ticket in tickets
             ]
 
-            response_payload = {"chat_id": telegram_id, "tickets": ticket_list_for_kafka}
+            response_payload = {"telegram_id": telegram_id, "tickets": ticket_list_for_kafka}
             await kafka_producer.send("notification.send.tickets", response_payload)
             logger.info(f"Successfully sent ticket list for user {telegram_id}")
 
