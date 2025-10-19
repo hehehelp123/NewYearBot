@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 DOWNLOAD_PATH = "/app/downloads"
 COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies.txt")
 
-
 class YtdlpLogger:
     def debug(self, msg):
         if "[debug]" in msg:
@@ -50,11 +49,12 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         'sleep_interval': 3,
         'max_sleep_interval': 10,
         'ignoreerrors': False,
-        'retries': 10,
-        'fragment_retries': 10,
+        'retries': 5,
+        'fragment_retries': 5,
         'socket_timeout': 120,
         'logger': YtdlpLogger(),
-        'verbose': True
+        'verbose': True,
+        'legacy_server_connect': True,
     }
 
     if user_agent:
@@ -64,11 +64,10 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         ydl_opts['cookiefile'] = COOKIE_FILE
         logger.info("Используется файл cookies для скачивания.")
     else:
-        logger.warning("Файл cookies.txt не найден или пуст. Скачивание будет произведено без cookies.")
+        logger.warning("Файл cookies.txt не найден или пуст.")
 
     try:
         logger.info(f"Используется yt-dlp версии: {yt_dlp.version.__version__}")
-
         files_before = set(os.listdir(DOWNLOAD_PATH))
 
         def sync_download():
@@ -87,7 +86,6 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
             logger.error("Скачивание завершилось, но новые файлы не найдены.")
             return []
 
-        logger.info(f"Найдены новые файлы: {new_files}")
         new_mp3_files = [f for f in new_files if f.endswith('.mp3')]
 
         if not new_mp3_files:
