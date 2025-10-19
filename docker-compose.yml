@@ -212,7 +212,7 @@ services:
       - backend
     depends_on:
       orchestrator_service:
-        condition: service_started
+        condition: service_healthy
 
   orchestrator_service:
     build:
@@ -229,13 +229,18 @@ services:
       kafka-setup:
         condition: service_completed_successfully
       user_service:
-        condition: service_started
+        condition: service_healthy
       wishlist_service:
-        condition: service_started
+        condition: service_healthy
       ticket_service:
-        condition: service_started
+        condition: service_healthy
       music_uploader_service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/menu"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   user_service:
     build:
@@ -253,6 +258,11 @@ services:
     depends_on:
       user_db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   wishlist_service:
     build:
@@ -270,6 +280,11 @@ services:
     depends_on:
       wishlist_db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ticket_service:
     build:
@@ -289,6 +304,11 @@ services:
         condition: service_healthy
       create-minio-bucket:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   notification_service:
     build:
