@@ -1,13 +1,14 @@
 import asyncio
 import json
 import logging
-import os
 import re
 from datetime import datetime
+
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
+
 from app.core.config import settings
 from app.services.storage_service import storage_service
 
@@ -86,7 +87,7 @@ class KafkaBotConsumer:
         await self.bot.send_document(chat_id, document, caption=caption, parse_mode="MarkdownV2")
 
     async def _handle_tickets_list(self, value: dict):
-        chat_id = value.get("chat_id")
+        chat_id = value.get("telegram_id")
         tickets = value.get("tickets")
         if not chat_id or not isinstance(tickets, list): return
 
