@@ -46,6 +46,8 @@ class BotService:
         else:
             kwargs['params'] = collected_data
 
+        logging.info(f"Sending request to Orchestrator. Method: {method}, URL: {url}, Payload: {kwargs}")
+
         response = await request_func(url, **kwargs)
         response.raise_for_status()
 
