@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
@@ -23,14 +23,13 @@ class SeleniumUploader:
     async def get_driver_session(self):
         driver: webdriver.Remote | None = None
         logger.info("Запрос новой сессии драйвера Selenium...")
-        options = EdgeOptions()
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("--disable-blink-features=AutomationControlled")
+        options = FirefoxOptions()
+        options.add_argument("-profile")
+        options.add_argument("/home/seluser/.mozilla/firefox/profile.default")
+        options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--user-data-dir=/home/seluser/.config/microsoft-edge")
 
         try:
             driver = webdriver.Remote(
