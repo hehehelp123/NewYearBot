@@ -46,16 +46,14 @@ async def download_audio(url: str, user_agent: str | None) -> list[tuple[str, st
         'outtmpl': os.path.join(DOWNLOAD_PATH, '%(title)s.%(ext)s'),
         'noplaylist': False,
         'progress_hooks': [logging_progress_hook],
-        'sleep_interval': 3,
-        'max_sleep_interval': 10,
         'ignoreerrors': False,
-        'retries': 5, # Уменьшено для более быстрой обратной связи
+        'retries': 5,
         'fragment_retries': 5,
         'socket_timeout': 120,
         'logger': YtdlpLogger(),
         'verbose': True,
-        # === ИСПРАВЛЕНИЕ: Используем более совместимый метод соединения ===
-        'legacy_server_connect': True,
+        # === ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: Принудительно использовать IPv4 ===
+        'source_address': '0.0.0.0',
     }
 
     if user_agent:
