@@ -214,7 +214,7 @@ services:
       - backend
     depends_on:
       orchestrator_service:
-        condition: service_started
+        condition: service_healthy
 
   orchestrator_service:
     build:
@@ -231,13 +231,19 @@ services:
       kafka-setup:
         condition: service_completed_successfully
       user_service:
-        condition: service_started
+        condition: service_healthy
       wishlist_service:
-        condition: service_started
+        condition: service_healthy
       ticket_service:
-        condition: service_started
+        condition: service_healthy
       music_uploader_service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/menu"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   user_service:
     build:
@@ -245,7 +251,7 @@ services:
     container_name: user_service
     env_file:
       - .env
-    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002"
+    command: sh -c "poetry run alembic upgrade head && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002"
     ports:
       - "8002:8002"
     volumes:
@@ -255,6 +261,12 @@ services:
     depends_on:
       user_db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   wishlist_service:
     build:
@@ -262,7 +274,7 @@ services:
     container_name: wishlist_service
     env_file:
       - .env
-    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8003"
+    command: sh -c "poetry run alembic upgrade head && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8003"
     ports:
       - "8003:8003"
     volumes:
@@ -273,6 +285,12 @@ services:
     depends_on:
       wishlist_db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   ticket_service:
     build:
@@ -298,10 +316,11 @@ services:
       create-minio-bucket:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8004/docs"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
 
   notification_service:
     build:
@@ -345,6 +364,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
 volumes:
   user_db_data:

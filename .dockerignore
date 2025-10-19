@@ -1,0 +1,22 @@
+# Игнорировать локальное виртуальное окружение Poetry
+.venv
+
+# Игнорировать кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Игнорировать служебные файлы IDE
+.vscode/
+.idea/
+
+# Игнорировать Git
+.git
+.gitignore
+.gitattributes
+
+# Игнорировать сборочные артефакты
+build/
+dist/
+*.egg-info/
