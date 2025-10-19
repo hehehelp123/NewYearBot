@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 echo "Waiting for Kafka to be reachable..."
 until kafka-topics --bootstrap-server kafka:29092 --list > /dev/null 2>&1; do
   echo "Kafka is not yet available, waiting 5 seconds..."
