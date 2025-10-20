@@ -182,11 +182,6 @@ services:
     image: selenium/standalone-firefox:latest
     container_name: selenium_firefox
     shm_size: 2g
-    environment:
-      SE_NODE_MAX_SESSIONS: 2
-      SE_NODE_OVERRIDE_MAX_SESSIONS: true
-    #entrypoint: /entrypoint.sh
-    #command: /opt/bin/entry_point.sh
     ports:
       - "4444:4444"
       - "7900:7900"
@@ -279,7 +274,6 @@ services:
       - "8003:8003"
     volumes:
       - ./wishlist_service/alembic/versions:/app/alembic/versions
-      - ./selenium_downloads:/app/downloads
     networks:
       - backend
     depends_on:
@@ -303,14 +297,9 @@ services:
       - "8004:8004"
     volumes:
       - ./ticket_service/alembic/versions:/app/alembic/versions
-      - ./selenium_downloads:/app/downloads
     networks:
       - backend
     depends_on:
-      kafka-setup:
-        condition: service_completed_successfully
-      selenium_edge:
-        condition: service_healthy
       ticket_db:
         condition: service_healthy
       create-minio-bucket:
