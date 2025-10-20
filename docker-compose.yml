@@ -366,3 +366,9 @@ volumes:
 networks:
   backend:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.99.0/24
+          gateway: 192.168.99.1
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "true"
