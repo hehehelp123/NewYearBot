@@ -1,9 +1,10 @@
 import logging
 import re
 import asyncio
+import os
 from typing import Optional, List
 
-from app.services.downloader import download_audio
+from app.services.downloader import download_audio, COOKIE_FILE
 from app.services.selenium_uploader import selenium_uploader
 from yandex_music import ClientAsync, Playlist, Track
 from yandex_music.utils.difference import Difference
@@ -98,7 +99,12 @@ class MusicSyncService:
             try:
                 async with selenium_uploader.get_driver_session() as driver:
                     user_agent = driver.execute_script("return navigator.userAgent;")
-                    await selenium_uploader.export_cookies(driver)
+
+                    if not os.path.exists(COOKIE_FILE) or os.path.getsize(COOKIE_FILE) == 0:
+                        logger.info(f"Файл cookie '{COOKIE_FILE}' не найден или пуст. Запускается экспорт...")
+                        await selenium_uploader.export_cookies(driver)
+                    else:
+                        logger.info(f"Файл cookie '{COOKIE_FILE}' уже существует. Экспорт пропущен.")
 
                     downloaded_data = await download_audio(source_url, user_agent)
                     if not downloaded_data:
