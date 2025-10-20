@@ -6,7 +6,7 @@ services:
     ports:
       - "2181:2181"
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKeeper_CLIENT_PORT: 2181
       ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_TICK_TIME: 2000
     networks:
@@ -337,23 +337,22 @@ services:
     env_file:
       - .env
     command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8006
-    ports:
-      - "8006:8006"
     volumes:
       - ./selenium_downloads:/app/downloads
     networks:
       - backend
+      - macvlan_net
     depends_on:
       kafka-setup:
         condition: service_completed_successfully
       selenium_firefox:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # healthcheck: # Закомментировано, так как localhost больше не будет работать в этой сетевой конфигурации
+    #   test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 30s
 
 volumes:
   user_db_data:
@@ -366,9 +365,13 @@ volumes:
 networks:
   backend:
     driver: bridge
+
+  macvlan_net:
+    driver: macvlan
+    driver_opts:
+      parent: eth0
+      com.docker.network.driver.mtu: "1400"
     ipam:
       config:
-        - subnet: 192.168.99.0/24
-          gateway: 192.168.99.1
-    driver_opts:
-      com.docker.network.bridge.enable_ip_masquerade: "true"
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.120
