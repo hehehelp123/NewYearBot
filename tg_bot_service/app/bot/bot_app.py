@@ -1,6 +1,5 @@
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime
 
 from aiogram import F, Bot
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Document, CallbackQuery
@@ -8,18 +7,23 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.core.http_client import http_client
 from app.core.config import settings
-from app.services.bot_service import bot_service
 from app.kafka.producer import kafka_producer
+from app.services.storage_service import storage_service
+from app.services.bot_service import bot_service
+from app.core.http_client import http_client
+
 
 class ActionForm(StatesGroup):
     waiting_for_field = State()
 
+
 START_BUTTON = "🔄 Старт"
+
 
 def get_schema_loader():
     schema_cache: Dict = {}
+
     async def load_schema() -> Dict:
         if schema_cache: return schema_cache
         try:
@@ -31,14 +35,18 @@ def get_schema_loader():
             logging.exception("Не удалось загрузить schema.json: %s", exc)
             schema_cache.clear()
             return schema_cache
+
     return load_schema
 
+
 load_schema = get_schema_loader()
+
 
 async def get_root_items() -> List[str]:
     schema = await load_schema()
     items = schema.get("items", [])
     return [item.get("name") for item in items if isinstance(item, Dict) and isinstance(item.get("name"), str)]
+
 
 def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
     if not isinstance(node, Dict): return None
@@ -47,6 +55,7 @@ def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
         if isinstance(child, Dict) and child.get("name") == target_name:
             return child
     return None
+
 
 def build_menu_keyboard(item_names: List[str], add_start: bool = False) -> ReplyKeyboardMarkup:
     row, rows = [], []
@@ -59,6 +68,7 @@ def build_menu_keyboard(item_names: List[str], add_start: bool = False) -> Reply
     if add_start: rows.append([KeyboardButton(text=START_BUTTON)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
+
 async def start_button_handler(message: Message, state: FSMContext) -> None:
     if message.text == START_BUTTON:
         await state.clear()
@@ -67,6 +77,7 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
         await state.update_data(current_node=await load_schema())
         await message.answer("Выберите пункт меню:", reply_markup=kb)
         return
+
 
 async def start_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -82,6 +93,7 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         await message.answer("Добро пожаловать! Выберите пункт меню:", reply_markup=kb)
     else:
         await message.answer("Схема меню пуста или не найдена.")
+
 
 async def menu_handler(message: Message, state: FSMContext) -> None:
     if not message.text or not message.from_user: return
@@ -104,32 +116,41 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         return
 
     if selected.get("type") == "action":
-        if "payload" in selected:
-            await start_form_action(selected, message, state)
-        elif "kafka_topic" in selected:
-            await process_kafka_action(selected, message, state)
+        await start_form_action(selected, message, state)
 
-async def process_kafka_action(action: dict, message: Message, state: FSMContext):
-    await message.answer("Ваш запрос принят в обработку...")
-    try:
-        command_path = action["kafka_topic"].replace('.', '_')
-        action_payload = {"telegram_id": message.from_user.id}
-        action_schema = {"method": "POST", "url": f"/api/v1/commands/{command_path}"}
-        await bot_service.execute_action(action_schema, action_payload)
-    except Exception as e:
-        await message.answer(f"Ошибка отправки команды: {e}")
 
 async def start_form_action(action: dict, message: Message, state: FSMContext):
     payload_schema = action.get("payload", {})
     fields = list(payload_schema.keys())
-    await state.set_state(ActionForm.waiting_for_field)
-    await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
-    field_name = fields[0]
-    field_info = payload_schema[field_name]
-    await message.answer(
-        f"Введите '{field_info['description']}' ({field_info['type']}):",
-        reply_markup=build_menu_keyboard([], add_start=True)
-    )
+
+    if not fields:
+        collected_data = {}
+        if message.from_user:
+            collected_data["telegram_id"] = message.from_user.id
+
+        await message.answer("Выполняю запрос...")
+
+        try:
+            kafka_topic = action.get("kafka_topic")
+            if not kafka_topic:
+                raise ValueError("В схеме не указан kafka_topic для этого действия")
+
+            await kafka_producer.send(kafka_topic, collected_data)
+        except Exception as e:
+            logging.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
+            await message.answer(f"Ошибка: {e}")
+        finally:
+            await reset_to_main_menu(message, state)
+    else:
+        await state.set_state(ActionForm.waiting_for_field)
+        await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
+        field_name = fields[0]
+        field_info = payload_schema[field_name]
+        await message.answer(
+            f"Введите '{field_info['description']}' ({field_info['type']}):",
+            reply_markup=build_menu_keyboard([], add_start=True)
+        )
+
 
 async def process_action_field(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
@@ -146,11 +167,19 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
             await message.answer("Пожалуйста, прикрепите файл.")
             return
         doc = message.document
-        await message.answer(f"Скачиваю файл '{doc.file_name}'...")
+        await message.answer(f"Загружаю файл '{doc.file_name}' на сервер...")
         file_info = await bot.get_file(doc.file_id)
         file_bytes = await bot.download_file(file_info.file_path)
-        if "__files__" not in collected_data: collected_data["__files__"] = {}
-        collected_data["__files__"][current_field_name] = (doc.file_name, file_bytes.read(), doc.mime_type)
+
+        try:
+            object_name = storage_service.upload_file(file_bytes.read(), doc.file_name)
+            collected_data[current_field_name] = object_name
+            await message.answer("Файл успешно загружен.")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки файла в MinIO: {e}", exc_info=True)
+            await message.answer("Произошла ошибка при загрузке файла. Попробуйте еще раз.")
+            return
+
     else:
         if not message.text:
             await message.answer("Пожалуйста, введите текст.")
@@ -165,15 +194,21 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
         await message.answer(f"Введите '{next_field_info['description']}' ({next_field_info['type']}):")
     else:
         if message.from_user: collected_data["telegram_id"] = message.from_user.id
-        await message.answer("Все данные собраны! Выполняю действие...")
+        await message.answer("Все данные собраны! Отправляю запрос на обработку...")
+
         try:
-            result = await bot_service.execute_action(action, collected_data)
-            await message.answer(f"Результат: {result}")
+            kafka_topic = action.get("kafka_topic")
+            if not kafka_topic:
+                raise ValueError("В схеме не указан kafka_topic для этого действия")
+
+            await kafka_producer.send(kafka_topic, collected_data)
+            await message.answer("Ваш запрос принят в обработку!")
         except Exception as e:
-            logging.error(f"Ошибка выполнения действия: {e}", exc_info=True)
-            await message.answer(f"Ошибка выполнения: {e}")
+            logging.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
+            await message.answer(f"Ошибка: {e}")
         finally:
             await reset_to_main_menu(message, state)
+
 
 async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
     action, value = query.data.split(":", 1)
@@ -209,6 +244,7 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
     elif action == "cancel_delete":
         await query.message.edit_text(query.message.text, entities=query.message.entities, reply_markup=None)
         await query.answer("Удаление отменено.")
+
 
 async def reset_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
