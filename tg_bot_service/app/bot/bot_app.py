@@ -1,11 +1,13 @@
 import logging
+import re
 from typing import Dict, List, Optional
 
 from aiogram import F, Bot
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Document, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Document, CallbackQuery, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardMarkup
+from aiogram.filters import StateFilter # Import StateFilter
 
 from app.core.config import settings
 from app.kafka.producer import kafka_producer
@@ -17,9 +19,19 @@ from app.core.http_client import http_client
 class ActionForm(StatesGroup):
     waiting_for_field = State()
 
+# New StatesGroup for browsing a wishlist
+class WishlistBrowser(StatesGroup):
+    browsing = State()
 
 START_BUTTON = "🔄 Старт"
 
+# --- Helper function to escape MarkdownV2 ---
+def escape_markdown(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    # Escape chars for Telegram MarkdownV2
+    escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
+    return re.sub(f"({escape_chars})", r"\\\1", text)
 
 def get_schema_loader():
     schema_cache: Dict = {}
@@ -74,6 +86,13 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
         await state.clear()
         item_names = await get_root_items()
         kb = build_menu_keyboard(item_names)
+        
+        # --- Add Demo Buttons ---
+        kb.keyboard.append([
+            KeyboardButton(text="My Wishlist (Demo)"), 
+            KeyboardButton(text="View Wishlist (Demo)")
+        ])
+        
         await state.update_data(current_node=await load_schema())
         await message.answer("Выберите пункт меню:", reply_markup=kb)
         return
@@ -90,6 +109,13 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     if item_names:
         await state.update_data(current_node=await load_schema())
         kb = build_menu_keyboard(item_names)
+        
+        # --- Add Demo Buttons ---
+        kb.keyboard.append([
+            KeyboardButton(text="My Wishlist (Demo)"), 
+            KeyboardButton(text="View Wishlist (Demo)")
+        ])
+
         await message.answer("Добро пожаловать! Выберите пункт меню:", reply_markup=kb)
     else:
         await message.answer("Схема меню пуста или не найдена.")
@@ -97,6 +123,16 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
 async def menu_handler(message: Message, state: FSMContext) -> None:
     if not message.text or not message.from_user: return
+    
+    # --- Handle Demo Wishlist Triggers ---
+    if message.text == "My Wishlist (Demo)":
+        await start_dummy_wishlist_browsing(message, state, as_owner=True)
+        return
+    if message.text == "View Wishlist (Demo)":
+        await start_dummy_wishlist_browsing(message, state, as_owner=False)
+        return
+    # --- End Demo Wishlist Triggers ---
+
     data = await state.get_data()
     current_node = data.get("current_node", await load_schema())
     selected = find_item_by_name(message.text, current_node)
@@ -211,6 +247,10 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
 
 
 async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
+    if query.data.startswith("wishlist_"):
+        await query.answer("Action intercepted by another handler.")
+        return
+
     action, value = query.data.split(":", 1)
     ticket_id = int(value)
     user_id = query.from_user.id
@@ -250,5 +290,186 @@ async def reset_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     item_names = await get_root_items()
     kb = build_menu_keyboard(item_names)
+    
+    # --- Add Demo Buttons ---
+    kb.keyboard.append([
+        KeyboardButton(text="My Wishlist (Demo)"), 
+        KeyboardButton(text="View Wishlist (Demo)")
+    ])
+    
     await state.update_data(current_node=await load_schema())
     await message.answer("Выберите пункт меню:", reply_markup=kb)
+
+async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> (str, InlineKeyboardMarkup):
+    """
+    Generates the text and keyboard for the current wishlist item.
+    """
+    data = await state.get_data()
+    items = data.get("items", [])
+    current_index = data.get("current_index", 0)
+    owner_user_id = data.get("owner_user_id", 0)
+
+    if not items:
+        return "Wishlist is empty.", None
+
+    item = items[current_index]
+    item_name = escape_markdown(item.get("name", "N/A"))
+    item_url = item.get("item_url")
+
+    text = f"*Товар {current_index + 1} из {len(items)}*\n\n"
+    text += f"*Название:* {item_name}\n"
+    if item_url:
+        text += f"*URL:* [Link]({item_url})\n"
+    
+    # Booking status
+    booking_info = item.get("booking")
+    is_owner = (owner_user_id == viewer_user_id)
+    
+    builder = InlineKeyboardBuilder()
+    
+    # Navigation Buttons
+    nav_buttons = []
+    if current_index > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="wishlist_prev"))
+    
+    nav_buttons.append(InlineKeyboardButton(text="❌ Закрыть", callback_data="wishlist_close"))
+    
+    if current_index < len(items) - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data="wishlist_next"))
+    builder.row(*nav_buttons)
+
+    # Action/Status Buttons
+    if booking_info:
+        booker_id = booking_info.get("booked_by_user_id")
+        if booker_id == viewer_user_id:
+            text += f"\n*Статус:* 🎁 Вы забронировали этот товар\\!\n"
+            builder.button(text="🎁 Снять бронь", callback_data=f"wishlist_unbook:{item['item_id']}")
+        else:
+            text += f"\n*Статус:* ⛔️ Забронирован пользователем {booker_id}\n"
+            # Optional: Add a disabled button
+            builder.button(text="⛔️ Забронирован", callback_data="wishlist_noop")
+    elif is_owner:
+        text += f"\n*Статус:* ✅ Доступен для бронирования\n"
+        # Owners can't book their own items
+        builder.button(text="Это ваш товар", callback_data="wishlist_noop")
+    else:
+        text += f"\n*Статус:* ✅ Доступен для бронирования\n"
+        builder.button(text="🎁 Забронировать", callback_data=f"wishlist_book:{item['item_id']}")
+
+    return text, builder.as_markup()
+
+async def start_dummy_wishlist_browsing(message: Message, state: FSMContext, as_owner: bool):
+    """
+    A mock function to trigger the wishlist browser state for demonstration.
+    This would normally be triggered by a Kafka consumer receiving wishlist data.
+    """
+    await state.clear()
+    
+    owner_id = 12345
+    viewer_id = message.from_user.id
+    
+    # If 'as_owner', the viewer IS the owner
+    if as_owner:
+        viewer_id = owner_id
+        
+    mock_items = [
+        {
+            "item_id": 101,
+            "name": "Red Scarf",
+            "item_url": "https://example.com/scarf",
+            "booking": None
+        },
+        {
+            "item_id": 102,
+            "name": "Blue Hat",
+            "item_url": "https://example.com/hat",
+            "booking": { "booked_by_user_id": 67890, "booked_at": "..." }
+        },
+        {
+            "item_id": 103,
+            "name": "Green Gloves",
+            "item_url": "https://example.com/gloves",
+            "booking": { "booked_by_user_id": viewer_id, "booked_at": "..." } # Booked by viewer
+        },
+        {
+            "item_id": 104,
+            "name": "Black Boots",
+            "item_url": "https://example.com/boots",
+            "booking": None
+        }
+    ]
+    
+    if not mock_items:
+        await message.answer("Ваш вишлист пуст.", reply_markup=build_menu_keyboard([], add_start=True))
+        return
+
+    await state.set_state(WishlistBrowser.browsing)
+    await state.update_data(
+        items=mock_items,
+        current_index=0,
+        owner_user_id=owner_id
+    )
+
+    text, markup = await build_wishlist_page(state, viewer_id)
+    await message.answer(text, reply_markup=markup, parse_mode="MarkdownV2")
+
+async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Handles all CallbackQuery events while in the WishlistBrowser.browsing state.
+    """
+    action, *value = query.data.split(":")
+    data = await state.get_data()
+    items = data.get("items", [])
+    current_index = data.get("current_index", 0)
+
+    new_index = current_index
+
+    if action == "wishlist_next":
+        if current_index < len(items) - 1:
+            new_index = current_index + 1
+        await state.update_data(current_index=new_index)
+
+    elif action == "wishlist_prev":
+        if current_index > 0:
+            new_index = current_index - 1
+        await state.update_data(current_index=new_index)
+
+    elif action == "wishlist_close":
+        await query.message.delete()
+        await reset_to_main_menu(query.message, state)
+        await query.answer()
+        return
+
+    elif action == "wishlist_book":
+        item_id = int(value[0])
+        await kafka_producer.send(
+            "wishlist.item.book",
+            {"item_id": item_id, "booker_user_id": query.from_user.id}
+        )
+        await query.answer("Запрос на бронирование отправлен...", show_alert=True)
+        # In a real app, a confirmation event from Kafka would trigger an update.
+        # For now, we just send the request and don't update the UI optimistically.
+        return # Don't re-render page
+
+    elif action == "wishlist_unbook":
+        item_id = int(value[0])
+        await kafka_producer.send(
+            "wishlist.item.unbook",
+            {"item_id": item_id, "unbooker_user_id": query.from_user.id}
+        )
+        await query.answer("Запрос на снятие брони отправлен...", show_alert=True)
+        return # Don't re-render page
+
+    elif action == "wishlist_noop":
+        await query.answer()
+        return # Do nothing
+
+    # Re-render the page if the index changed
+    try:
+        text, markup = await build_wishlist_page(state, query.from_user.id)
+        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
+    except Exception as e:
+        logging.warning(f"Error updating wishlist page: {e}")
+        # This can happen if the message is identical, which is fine
+    
+    await query.answer()

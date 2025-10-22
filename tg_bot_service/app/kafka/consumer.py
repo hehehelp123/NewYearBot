@@ -4,13 +4,16 @@ import logging
 import re
 from datetime import datetime
 
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
 
 from app.core.config import settings
 from app.services.storage_service import storage_service
+from app.bot.bot_app import build_wishlist_page, WishlistBrowser # <-- Import UI builder and state
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +26,10 @@ def escape_markdown(text: str) -> str:
 
 
 class KafkaBotConsumer:
-    def __init__(self, bot: Bot, *topics: str):
+    def __init__(self, bot: Bot, dp: Dispatcher, *topics: str):
         self.bot = bot
         self.topics = topics
+        self.storage = dp.storage # <-- Get FSM storage from Dispatcher
         self.consumer: AIOKafkaConsumer | None = None
         self._task = None
 
@@ -58,6 +62,11 @@ class KafkaBotConsumer:
                         await self._handle_document_message(msg.value)
                     elif msg.topic == "notification.send.tickets":
                         await self._handle_tickets_list(msg.value)
+                    
+                    # --- Handle Wishlist View Topics ---
+                    elif msg.topic in ("wishlist.view.owner", "wishlist.view.viewer"):
+                        await self._handle_wishlist_view(msg.value)
+
                 except Exception as e:
                     logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
         except asyncio.CancelledError:
@@ -116,3 +125,37 @@ class KafkaBotConsumer:
                 f"   {format_dt(ticket.get('arrival_datetime'))}"
             )
             await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
+
+    async def _handle_wishlist_view(self, value: dict):
+        telegram_id = value.get("telegram_id")
+        owner_user_id = value.get("owner_user_id")
+        items = value.get("items", [])
+
+        if not telegram_id or owner_user_id is None:
+            logger.warning(f"Invalid wishlist view payload: {value}")
+            return
+        
+        ctx = FSMContext(
+            self.storage,
+            key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id)
+        )
+        
+        if not items:
+            await self.bot.send_message(telegram_id, "Этот вишлист пуст\\.")
+            await ctx.clear()
+            return
+        
+        await ctx.set_state(WishlistBrowser.browsing)
+        await ctx.set_data({
+            "items": items,
+            "current_index": 0,
+            "owner_user_id": owner_user_id
+        })
+
+        text, markup = await build_wishlist_page(ctx, telegram_id)
+        await self.bot.send_message(
+            telegram_id,
+            text,
+            reply_markup=markup,
+            parse_mode="MarkdownV2"
+        )
