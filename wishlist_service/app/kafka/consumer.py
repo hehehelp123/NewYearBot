@@ -166,8 +166,6 @@ class KafkaConsumer:
                     await handle_wishlist_unbook_event(msg.value)
                 elif msg.topic == "wishlist.item.delete":
                     await handle_wishlist_delete_event(msg.value)
-                elif msg.topic == "wishlist.view.owner":
-                    await handle_wishlist_get_owner(msg.value)
                 elif msg.topic == "wishlist.view.viewer":
                     await handle_wishlist_get_viewer(msg.value)
         except asyncio.CancelledError:

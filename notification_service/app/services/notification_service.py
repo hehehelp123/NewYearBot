@@ -95,7 +95,7 @@ class NotificationService:
             message = f"❗️ Не удалось удалить товар\\.\n*Причина:* {reason}"
             await self._send_immediate(chat_id, message)
 
-        elif event_type in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
+        elif event_type in ("wishlist.view.viewer_failed"):
             reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
             message = f"❗️ Не удалось загрузить вишлист\\.\n*Причина:* {reason}"
             await self._send_immediate(chat_id, message)

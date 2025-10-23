@@ -72,7 +72,7 @@ class KafkaBotConsumer:
                         await self._handle_document_message(msg.value)
                     elif msg.topic == "notification.send.tickets":
                         await self._handle_tickets_list(msg.value)
-                    elif msg.topic in ("wishlist.view.owner_success", "wishlist.view.viewer_success"):
+                    elif msg.topic in "wishlist.view.viewer_success":
                         await self._handle_wishlist_view(msg.value)
                     elif msg.topic in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
                         await self.bot.send_message(msg.value["telegram_id"], msg.value.get("error", "Failed wishlist."))

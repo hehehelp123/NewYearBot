@@ -21,7 +21,6 @@ consumer = KafkaConsumer(
     "wishlist.item.book",
     "wishlist.item.unbook",
     "wishlist.view.viewer",
-    "wishlist.view.owner",
     "wishlist.item.delete",
 )
 

@@ -263,32 +263,6 @@ class WishlistService:
             failure_payload["reason"] = f"Database error: {e}"
             await kafka_producer.send("wishlist.item.delete_failed", failure_payload)
 
-    async def get_and_push_wishlist_for_owner(self, owner_user_name: str, requester_user_id: int):
-        wishlist = await self.get_wishlist_by_owner_id(owner_user_name)
-        
-        if not wishlist:
-            logger.warning(f"No wishlist found for owner {owner_user_name} (requested by {requester_user_id}).")
-            await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_name": owner_user_name,
-                "telegram_id": requester_user_id,
-                "reason": "Wishlist not found."
-            })
-            return
-
-        try:
-            owner_schema = WishlistForOwner.model_validate(wishlist)
-            owner_payload = owner_schema.model_dump(mode="json")
-            owner_payload["telegram_id"] = requester_user_id
-            await kafka_producer.send("wishlist.view.owner_success", owner_payload)
-            logger.info(f"Sent owner view for wishlist {wishlist.wishlist_id} to user {requester_user_id}")
-        except Exception as e:
-            logger.error(f"Failed to serialize and send owner view for {owner_user_name}: {e}")
-            await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_name": owner_user_name,
-                "telegram_id": requester_user_id,
-                "reason": f"Internal serialization error: {e}"
-            })
-
     async def get_and_push_wishlist_for_viewer(self, owner_user_name: str, requester_user_id: int):
         wishlist = await self.get_wishlist_by_owner_name(owner_user_name)
         

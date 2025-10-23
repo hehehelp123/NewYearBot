@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "notification.send", "notification.send.document", "notification.send.tickets",
         "wishlist.view.owner_success", "wishlist.view.viewer_success",
         "wishlist.view.owner_failed", "wishlist.view.viewer_failed",
-        "user.user.allowed", "user.user.disallowed", "user.user.list_response",
+        "user.user.allowed", "user.user.disallowed", "user.user.list_response"
     ]
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)
     await kafka_consumer.start()
