@@ -13,7 +13,7 @@ from aiokafka import AIOKafkaConsumer
 
 from app.core.config import settings
 from app.services.storage_service import storage_service
-from app.bot.bot_app import build_wishlist_page, WishlistBrowser # <-- Import UI builder and state
+from app.bot.bot_app import build_wishlist_page, WishlistBrowser 
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class KafkaBotConsumer:
     def __init__(self, bot: Bot, dp: Dispatcher, *topics: str):
         self.bot = bot
         self.topics = topics
-        self.storage = dp.storage # <-- Get FSM storage from Dispatcher
+        self.storage = dp.storage
         self.consumer: AIOKafkaConsumer | None = None
         self._task = None
 
@@ -62,9 +62,7 @@ class KafkaBotConsumer:
                         await self._handle_document_message(msg.value)
                     elif msg.topic == "notification.send.tickets":
                         await self._handle_tickets_list(msg.value)
-                    
-                    # --- Handle Wishlist View Topics ---
-                    elif msg.topic in ("wishlist.view.owner", "wishlist.view.viewer"):
+                    elif msg.topic in ("wishlist.view.owner_success", "wishlist.view.viewer_success"):
                         await self._handle_wishlist_view(msg.value)
 
                 except Exception as e:
@@ -130,6 +128,7 @@ class KafkaBotConsumer:
         telegram_id = value.get("telegram_id")
         owner_user_id = value.get("owner_user_id")
         items = value.get("items", [])
+        logger.info("Начата обработка вишлиста")
 
         if not telegram_id or owner_user_id is None:
             logger.warning(f"Invalid wishlist view payload: {value}")
@@ -141,7 +140,7 @@ class KafkaBotConsumer:
         )
         
         if not items:
-            await self.bot.send_message(telegram_id, "Этот вишлист пуст\\.")
+            await self.bot.send_message(telegram_id, "Этот саботажник ничего не добавил. Стучать по голове.")
             await ctx.clear()
             return
         
@@ -151,8 +150,9 @@ class KafkaBotConsumer:
             "current_index": 0,
             "owner_user_id": owner_user_id
         })
-
+        logger.info("Построение отображения вишлиста")
         text, markup = await build_wishlist_page(ctx, telegram_id)
+        logger.info("Отправляю сообщение")
         await self.bot.send_message(
             telegram_id,
             text,

@@ -3,10 +3,15 @@ import json
 import logging
 from aiokafka import AIOKafkaConsumer
 from app.core.config import settings
-from app.schemas.wishlist_schemas import WishlistAddRequest, WishlistCreate, ItemBookRequest, WishlistGetRequest
+from app.schemas.wishlist_schemas import (
+    WishlistAddRequest, 
+    WishlistCreate, 
+    ItemBookRequest, 
+    ItemDeleteRequest, 
+    WishlistGetRequest
+)
 from app.core.db import AsyncSessionLocal
 from app.services.wishlist_service import WishlistService
-# from app.kafka.producer import kafka_producer # <-- Removed
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +22,6 @@ async def handle_wishlist_add_event(event_data: dict):
         source_url_str = str(wishlist_request.source_url)
 
         async with AsyncSessionLocal() as session:
-            # We create a task so the consumer isn't blocked by long-running scraping
             asyncio.create_task(
                 WishlistService(session).add_to_wishlist(source_url_str, wishlist_request.telegram_id)
             )
@@ -54,18 +58,15 @@ async def handle_wishlist_book_event(event_data: dict):
         
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            # Service now handles all success/failure responses
             await service.book_item(book_request.item_id, book_request.booker_user_id)
         
         logger.info(f"Task to book item {book_request.item_id} for user {book_request.booker_user_id} processed.")
 
     except Exception as e:
         logger.error(f"Error processing book event: {e}", exc_info=True)
-        # We no longer send a Kafka failure message from here
 
 async def handle_wishlist_unbook_event(event_data: dict):
     try:
-        # Re-using ItemBookRequest schema, 'booker_user_id' is the unbooker
         unbook_request = ItemBookRequest(
             item_id=event_data["item_id"],
             booker_user_id=event_data["unbooker_user_id"] 
@@ -73,38 +74,52 @@ async def handle_wishlist_unbook_event(event_data: dict):
         
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            # Service now handles all success/failure responses
             await service.unbook_item(unbook_request.item_id, unbook_request.booker_user_id)
         
         logger.info(f"Task to unbook item {unbook_request.item_id} for user {unbook_request.booker_user_id} processed.")
 
     except Exception as e:
         logger.error(f"Error processing unbook event: {e}", exc_info=True)
-        # We no longer send a Kafka failure message from here
+
+async def handle_wishlist_delete_event(event_data: dict):
+    try:
+        delete_request = ItemDeleteRequest(
+            item_id=event_data["item_id"],
+            deleter_user_id=event_data["deleter_user_id"] 
+        )
+        
+        async with AsyncSessionLocal() as session:
+            service = WishlistService(session)
+            await service.delete_item(delete_request.item_id, delete_request.deleter_user_id)
+        
+        logger.info(f"Task to delete item {delete_request.item_id} by user {delete_request.deleter_user_id} processed.")
+
+    except Exception as e:
+        logger.error(f"Error processing delete event: {e}", exc_info=True)
 
 async def handle_wishlist_get_owner(event_data: dict):
     try:
         request = WishlistGetRequest(
-            owner_user_id=event_data["owner_user_id"],
-            requester_user_id=event_data["requester_user_id"]
+            owner_user_name=event_data["target_user"],
+            requester_user_id=event_data["telegram_id"]
         )
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_wishlist_for_owner(request.owner_user_id, request.requester_user_id)
-        logger.info(f"Task to get owner view for {request.owner_user_id} (requested by {request.requester_user_id}) processed.")
+            await service.get_and_push_wishlist_for_owner(request.owner_user_name, request.requester_user_id)
+        logger.info(f"Task to get owner view for {request.owner_user_name} (requested by {request.requester_user_id}) processed.")
     except Exception as e:
         logger.error(f"Error processing get_owner event: {e}", exc_info=True)
 
 async def handle_wishlist_get_viewer(event_data: dict):
     try:
         request = WishlistGetRequest(
-            owner_user_id=event_data["owner_user_id"],
-            requester_user_id=event_data["requester_user_id"]
+            owner_user_name=event_data["target_user"],
+            requester_user_id=event_data["telegram_id"]
         )
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_wishlist_for_viewer(request.owner_user_id, request.requester_user_id)
-        logger.info(f"Task to get viewer view for {request.owner_user_id} (requested by {request.requester_user_id}) processed.")
+            await service.get_and_push_wishlist_for_viewer(request.owner_user_name, request.requester_user_id)
+        logger.info(f"Task to get viewer view for {request.owner_user_name} (requested by {request.requester_user_id}) processed.")
     except Exception as e:
         logger.error(f"Error processing get_viewer event: {e}", exc_info=True)
 
@@ -149,9 +164,11 @@ class KafkaConsumer:
                     await handle_wishlist_book_event(msg.value)
                 elif msg.topic == "wishlist.item.unbook":
                     await handle_wishlist_unbook_event(msg.value)
-                elif msg.topic == "wishlist.view.get_owner":
+                elif msg.topic == "wishlist.item.delete":
+                    await handle_wishlist_delete_event(msg.value)
+                elif msg.topic == "wishlist.view.owner":
                     await handle_wishlist_get_owner(msg.value)
-                elif msg.topic == "wishlist.view.get_viewer":
+                elif msg.topic == "wishlist.view.viewer":
                     await handle_wishlist_get_viewer(msg.value)
         except asyncio.CancelledError:
             logger.info("Задача консумера отменена.")

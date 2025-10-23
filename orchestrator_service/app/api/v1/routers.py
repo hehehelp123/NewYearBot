@@ -3,11 +3,14 @@ import io
 from fastapi import APIRouter, Request, Form, UploadFile, File, HTTPException, status, Body
 from app.kafka.producer import kafka_producer
 from app.services.storage_service import storage_service
+from app.services.menu_service import menu_service
 
 router = APIRouter()
 
 @router.get("/menu")
-def get_menu(request: Request):
+async def get_menu(request: Request):
+    menu_tree, command_map = await menu_service.build_menu_tree()
+    request.app.state.menu_tree = menu_tree
     return request.app.state.menu_tree
 
 @router.post("/tickets")

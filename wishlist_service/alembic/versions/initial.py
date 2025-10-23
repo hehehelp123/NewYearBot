@@ -29,6 +29,8 @@ def upgrade() -> None:
     sa.Column('wishlist_id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('item_url', sa.String(), nullable=True),
+    sa.Column('cost', sa.String(), nullable=True),
+    sa.Column('delivery_date', sa.String(), nullable=True),
     sa.Column('added_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['wishlist_id'], ['wishlists.wishlist_id'], ),
     sa.PrimaryKeyConstraint('item_id')

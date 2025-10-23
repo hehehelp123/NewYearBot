@@ -19,8 +19,17 @@ def get_wishlist_service_features():
                     "type": "action",
                     "kafka_topic": "wishlist.wishlist.add",
                     "payload": {
-                        "source_url": {"type": "string", "description": "Ссылка на товар озон"}
-                    }
+                        "source_url": {"type": "string", "description": "Ссылка на товар ozon/wildberries/aliexpress/yandex market"}
+                    },
+                },
+                {
+                    "name": "Просмотреть вишлист пользователя",
+                    "type": "action",
+                    "unfinished": True,
+                    "kafka_topic": "wishlist.view.viewer",
+                    "payload": {
+                        "target_user": {"type": "string", "description": "Введите тэг пользователя"}
+                    },
                 },
             ]
         }

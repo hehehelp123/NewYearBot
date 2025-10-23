@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import StateFilter # <-- Import StateFilter
+from aiogram.filters import StateFilter 
 from fastapi import FastAPI
 
 from app.core.config import settings
@@ -14,13 +14,13 @@ from app.kafka.producer import kafka_producer
 from app.bot.bot_app import (
     START_BUTTON,
     ActionForm,
-    WishlistBrowser,  # <-- Import new state
+    WishlistBrowser, 
     callback_query_handler,
     menu_handler,
     process_action_field,
     start_button_handler,
     start_handler,
-    wishlist_navigation_handler, # <-- Import new handler
+    wishlist_navigation_handler, 
 )
 
 
@@ -39,8 +39,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "notification.send",
         "notification.send.document",
         "notification.send.tickets",
-        "wishlist.view.owner",
-        "wishlist.view.viewer",
+        "wishlist.view.owner_success",
+        "wishlist.view.viewer_success",
         "wishlist.view.owner_failed",
         "wishlist.view.viewer_failed",
     ]

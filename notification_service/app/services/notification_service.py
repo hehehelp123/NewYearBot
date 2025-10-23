@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str):
         return ""
-    # Updated escape chars for Telegram MarkdownV2
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f"({escape_chars})", r"\\\1", text)
 
@@ -86,6 +85,16 @@ class NotificationService:
             message = f"❗️ Не удалось снять бронь\\.\n*Причина:* {reason}"
             await self._send_immediate(chat_id, message)
         
+        elif event_type == "wishlist.item.deleted":
+            name = escape_markdown(event_data.get("item_name", "Товар"))
+            message = f"✅ Товар '*{name}*' был успешно удален из вашего вишлиста\\."
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.delete_failed":
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось удалить товар\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
+
         elif event_type in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
             reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
             message = f"❗️ Не удалось загрузить вишлист\\.\n*Причина:* {reason}"

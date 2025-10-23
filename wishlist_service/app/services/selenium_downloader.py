@@ -26,13 +26,10 @@ class SeleniumDownloader:
         driver: webdriver.Remote | None = None
         logger.info("Запрос новой сессии драйвера Selenium...")
         options = FirefoxOptions()
-        options.add_argument("-profile")
-        options.add_argument("/home/seluser/.mozilla/firefox/profile.default")
-        options.add_argument("--headless")
+        options.profile = "/home/seluser/.mozilla/firefox/profile1.default"
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        # options.add_argument("--user-data-dir=/home/seluser/.config/microsoft-edge")
 
         try:
             driver = webdriver.Remote(

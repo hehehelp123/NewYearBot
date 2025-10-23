@@ -5,23 +5,28 @@ class WishlistAddRequest(BaseModel):
     source_url: HttpUrl
     telegram_id: int
 
-# --- Booking Schemas ---
 class ItemBookingInfo(BaseModel):
     booked_by_user_id: int
     booked_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 class ItemBookRequest(BaseModel):
     item_id: int
     booker_user_id: int
 
+class ItemDeleteRequest(BaseModel):
+    item_id: int
+    deleter_user_id: int
+
 class WishlistGetRequest(BaseModel):
-    owner_user_id: int
+    owner_user_name: str
     requester_user_id: int
 
-# --- Item Schemas ---
 class WishlistItemBase(BaseModel):
     name: str
     item_url: str | None = None
+    cost: str | None = None
+    delivery_date: str | None = None
 
 class WishlistItemCreate(WishlistItemBase):
     pass
@@ -34,7 +39,6 @@ class WishlistItemForOwner(WishlistItemBase):
 class WishlistItemForViewer(WishlistItemForOwner):
     booking: ItemBookingInfo | None = None
 
-# --- Wishlist Schemas ---
 class WishlistBase(BaseModel):
     owner_user_id: int
     name: str

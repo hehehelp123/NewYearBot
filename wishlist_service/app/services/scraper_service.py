@@ -24,7 +24,6 @@ class ScraperService:
             try:
                 async with selenium_downloader.get_driver_session() as driver:
                     user_agent = driver.execute_script("return navigator.userAgent;")
-                    # await selenium_downloader.export_cookies(driver)
 
                     logger.info(f"Переход на страницу: {source_url}")
                     driver.get(source_url)

@@ -76,7 +76,6 @@ class WishlistService:
 
         logger.debug(f"Successfully fetched created wishlist with id: {created_wishlist.wishlist_id}")
 
-        # Send 'created' event
         wishlist_schema = WishlistForOwner.model_validate(created_wishlist)
         event_payload = wishlist_schema.model_dump(mode="json")
         event_payload["telegram_id"] = created_wishlist.owner_user_id
@@ -89,6 +88,8 @@ class WishlistService:
         logger.info(f"Starting background task to add item from {source_url} for user {user_id}")
         downloaded_data = await scraper_service.parse_url(source_url, user_id)
         
+        logger.info(downloaded_data)
+
         if not downloaded_data or not downloaded_data.get('name'):
             logger.error(f"Background task: Failed to parse item data from {source_url} for user {user_id}")
             await kafka_producer.send("wishlist.item.add_failed",
@@ -109,7 +110,9 @@ class WishlistService:
         try:
             item_data = WishlistItemCreate(
                 name=downloaded_data['name'],
-                item_url=downloaded_data.get('item_url', source_url)
+                item_url=downloaded_data.get('item_url', source_url),
+                cost=downloaded_data['cost'],
+                delivery_date=downloaded_data['delivery_date'],
             )
             
             db_item = WishlistItem(**item_data.model_dump(), wishlist_id=wishlist.wishlist_id)
@@ -171,7 +174,7 @@ class WishlistService:
             "owner_user_id": item.wishlist.owner_user_id,
             "telegram_id": booker_user_id
         })
-
+    
     async def unbook_item(self, item_id: int, unbooker_user_id: int):
         item = await self.get_item_by_id(item_id)
         
@@ -213,13 +216,60 @@ class WishlistService:
             "telegram_id": unbooker_user_id
         })
 
-    async def get_and_push_wishlist_for_owner(self, owner_user_id: int, requester_user_id: int):
-        wishlist = await self.get_wishlist_by_owner_id(owner_user_id)
+    async def delete_item(self, item_id: int, deleter_user_id: int):
+        item = await self.get_item_by_id(item_id)
+        
+        failure_payload = {
+            "item_id": item_id,
+            "deleter_user_id": deleter_user_id,
+            "telegram_id": deleter_user_id
+        }
+        
+        if not item:
+            logger.warning(f"Failed deletion: Item {item_id} not found.")
+            failure_payload["reason"] = "Item not found."
+            await kafka_producer.send("wishlist.item.delete_failed", failure_payload)
+            return
+
+        if item.wishlist.owner_user_id != deleter_user_id:
+            logger.warning(f"Failed deletion: User {deleter_user_id} cannot delete item {item_id} from wishlist of {item.wishlist.owner_user_id}.")
+            failure_payload["reason"] = "You can only delete items from your own wishlist."
+            await kafka_producer.send("wishlist.item.delete_failed", failure_payload)
+            return
+
+        item_name = item.name
+        owner_user_id = item.wishlist.owner_user_id
+
+        try:
+            if item.booking:
+                logger.debug(f"Deleting associated booking for item {item_id}")
+                await self.db_session.delete(item.booking)
+            
+            await self.db_session.delete(item)
+            await self.db_session.commit()
+            
+            logger.info(f"Item {item_id} ({item_name}) successfully deleted by user {deleter_user_id}")
+
+            await kafka_producer.send("wishlist.item.deleted", {
+                "item_id": item_id,
+                "item_name": item_name,
+                "owner_user_id": owner_user_id,
+                "telegram_id": deleter_user_id 
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to delete item {item_id} from DB: {e}", exc_info=True)
+            await self.db_session.rollback()
+            failure_payload["reason"] = f"Database error: {e}"
+            await kafka_producer.send("wishlist.item.delete_failed", failure_payload)
+
+    async def get_and_push_wishlist_for_owner(self, owner_user_name: str, requester_user_id: int):
+        wishlist = await self.get_wishlist_by_owner_id(owner_user_name)
         
         if not wishlist:
-            logger.warning(f"No wishlist found for owner {owner_user_id} (requested by {requester_user_id}).")
+            logger.warning(f"No wishlist found for owner {owner_user_name} (requested by {requester_user_id}).")
             await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_id": owner_user_id,
+                "owner_user_name": owner_user_name,
                 "telegram_id": requester_user_id,
                 "reason": "Wishlist not found."
             })
@@ -228,24 +278,24 @@ class WishlistService:
         try:
             owner_schema = WishlistForOwner.model_validate(wishlist)
             owner_payload = owner_schema.model_dump(mode="json")
-            owner_payload["telegram_id"] = requester_user_id # Send data to the requester
-            await kafka_producer.send("wishlist.view.owner", owner_payload)
+            owner_payload["telegram_id"] = requester_user_id
+            await kafka_producer.send("wishlist.view.owner_success", owner_payload)
             logger.info(f"Sent owner view for wishlist {wishlist.wishlist_id} to user {requester_user_id}")
         except Exception as e:
-            logger.error(f"Failed to serialize and send owner view for {owner_user_id}: {e}")
+            logger.error(f"Failed to serialize and send owner view for {owner_user_name}: {e}")
             await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_id": owner_user_id,
+                "owner_user_name": owner_user_name,
                 "telegram_id": requester_user_id,
                 "reason": f"Internal serialization error: {e}"
             })
 
-    async def get_and_push_wishlist_for_viewer(self, owner_user_id: int, requester_user_id: int):
-        wishlist = await self.get_wishlist_by_owner_id(owner_user_id)
+    async def get_and_push_wishlist_for_viewer(self, owner_user_name: str, requester_user_id: int):
+        wishlist = await self.get_wishlist_by_owner_name(owner_user_name)
         
         if not wishlist:
-            logger.warning(f"No wishlist found for owner {owner_user_id} (requested by {requester_user_id}).")
+            logger.warning(f"No wishlist found for owner {owner_user_name} (requested by {requester_user_id}).")
             await kafka_producer.send("wishlist.view.viewer_failed", {
-                "owner_user_id": owner_user_id,
+                "owner_user_name": owner_user_name,
                 "telegram_id": requester_user_id,
                 "reason": "Wishlist not found."
             })
@@ -255,12 +305,23 @@ class WishlistService:
             viewer_schema = WishlistForViewer.model_validate(wishlist)
             viewer_payload = viewer_schema.model_dump(mode="json")
             viewer_payload["telegram_id"] = requester_user_id
-            await kafka_producer.send("wishlist.view.viewer", viewer_payload)
+            await kafka_producer.send("wishlist.view.viewer_success", viewer_payload)
             logger.info(f"Sent viewer view for wishlist {wishlist.wishlist_id} to user {requester_user_id}")
         except Exception as e:
-            logger.error(f"Failed to serialize and send viewer view for {owner_user_id}: {e}")
+            logger.error(f"Failed to serialize and send viewer view for {owner_user_name}: {e}")
             await kafka_producer.send("wishlist.view.viewer_failed", {
-                "owner_user_id": owner_user_id,
+                "owner_user_name": owner_user_name,
                 "telegram_id": requester_user_id,
                 "reason": f"Internal serialization error: {e}"
             })
+
+
+    async def get_wishlist_by_owner_name(self, owner_user_name: str) -> Wishlist | None:
+        logger.debug(f"Fetching wishlist by owner_user_id: {owner_user_name}")
+        query = (
+            select(Wishlist)
+            .where(Wishlist.name == owner_user_name)
+            .options(selectinload(Wishlist.items).selectinload(WishlistItem.booking))
+        )
+        result = await self.db_session.execute(query)
+        return result.scalar_one_or_none()

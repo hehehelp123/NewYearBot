@@ -20,8 +20,9 @@ consumer = KafkaConsumer(
     "wishlist.wishlist.create",
     "wishlist.item.book",
     "wishlist.item.unbook",
-    "wishlist.view.get_owner",
-    "wishlist.view.get_viewer"
+    "wishlist.view.viewer",
+    "wishlist.view.owner",
+    "wishlist.item.delete",
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

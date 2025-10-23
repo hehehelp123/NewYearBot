@@ -39,6 +39,3 @@ class KafkaConsumer:
             logger.info("Consumer task cancelled.")
         finally:
             logger.info("Consumer loop finished.")
-
-# Пример создания инстанса для конкретных топиков
-# consumer = KafkaConsumer("topic1", "topic2")

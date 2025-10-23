@@ -21,6 +21,8 @@ class WishlistItem(Base):
     added_at = Column(DateTime, server_default=func.now(), nullable=False)
     wishlist = relationship("Wishlist", back_populates="items")
     booking = relationship("ItemBooking", back_populates="item", uselist=False)
+    cost = Column(String, nullable=True)
+    delivery_date = Column(String, nullable=True)
 
 class ItemBooking(Base):
     __tablename__ = 'item_bookings'

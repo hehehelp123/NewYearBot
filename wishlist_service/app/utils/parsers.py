@@ -37,7 +37,6 @@ def convert_russian_short_date(short_date):
     return f"{day} {full_month}"
 
 def map_date_difference(input_date_str):
-    # Dictionary to map Russian month names to numbers
     month_map = {
         'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
         'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
@@ -92,7 +91,6 @@ def parse_yamarket_data(html_content) -> dict:
     
     if match:
         short_date = match.group(1).strip()
-        # Convert and store the date
         product_info['delivery_date'] = map_date_difference(convert_russian_short_date(short_date))
     
     return product_info
@@ -103,7 +101,6 @@ def parse_ozon_data(html_content):
     product_data = {
         "name": None,
         "cost": None,
-        "currency": None,
         "delivery_date": None,
         "image_url": None
     }
@@ -115,8 +112,7 @@ def parse_ozon_data(html_content):
             product_data['name'] = json_data.get('name')
             product_data['image_url'] = json_data.get('image')
             offers = json_data.get('offers', {})
-            product_data['cost'] = offers.get('price')
-            product_data['currency'] = offers.get('priceCurrency')
+            product_data['cost'] = offers.get('price') + offers.get('priceCurrency')
         except (json.JSONDecodeError, AttributeError) as e:
             print(f"Could not parse JSON-LD script tag: {e}")
 
@@ -139,7 +135,7 @@ def parse_wildberries_data(html_string: str):
 
     product_data = {
         'name': 'Not Found',
-        'price': 'Not Found',
+        'cost': 'Not Found',
         'delivery_date': 'Not Found',
         'image_url': 'Not Found',
     }
@@ -154,12 +150,10 @@ def parse_wildberries_data(html_string: str):
     try:
         price_element = soup.select_one('span[class*="priceBlockWalletPrice"]')
         if price_element:
-            # Clean up the price string (remove currency symbol, spaces, etc.)
             raw_price : str = price_element.text.strip()
-            # In this case, we'll keep the raw string as it contains currency (₽)
-            product_data['price'] = raw_price.replace("\xa0", ' ')
+            product_data['cost'] = raw_price.replace("\xa0", ' ')
     except Exception as e:
-        print(f"Error extracting price: {e}")
+        print(f"Error extracting cost: {e}")
 
     try:
         delivery_element = soup.select_one('div[class*="deliveryTitle--zdyCe"]')
@@ -187,21 +181,22 @@ def parse_wildberries_data(html_string: str):
 def parse_aliexpress_data(html_string):
     soup = BeautifulSoup(html_string, 'html.parser')
     product_data = {
-        "product_name": None,
-        "price": None,
-        "image_url": None
+        "name": None,
+        "cost": None,
+        "image_url": None,
+        "delivery_date": "Китайские заначки (>14 дней)",
     }
 
     title_tag = soup.find('title')
     if title_tag and title_tag.string:
         name_parts = title_tag.string.split('|')
-        product_data["product_name"] = name_parts[0].strip()
+        product_data["name"] = name_parts[0].strip()
 
     price_tag = soup.find('p', class_=lambda c: c and 'HazeStickyOfferPrice__price' in c)
     if price_tag:
         raw_price = price_tag.text.strip()
         cleaned_price = raw_price.replace('\xa0', ' ')
-        product_data["price"] = cleaned_price
+        product_data["cost"] = cleaned_price
 
     og_image_tag = soup.find('meta', property='og:image')
     if og_image_tag and og_image_tag.get('content'):
