@@ -6,8 +6,9 @@ ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 ENV PATH="$POETRY_HOME/bin:$PATH"
 
-RUN apt-get update && apt-get install --no-install-recommends -y curl build-essential
-RUN curl -sSL https://install.python-poetry.org | python -
+RUN apt-get update && apt-get install --no-install-recommends -y build-essential \
+    && pip install --no-cache-dir poetry \
+    && apt-get purge -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry install --no-root
