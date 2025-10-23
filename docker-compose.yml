@@ -273,7 +273,7 @@ services:
     container_name: wishlist_service
     env_file:
       - .env
-    command: sh -c "poetry run alembic upgrade head && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8003"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8003"
     ports:
       - "8003:8003"
     volumes:
@@ -298,7 +298,7 @@ services:
     container_name: ticket_service
     env_file:
       - .env
-    command: sh -c "poetry run alembic upgrade head && exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8004"
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8004"
     ports:
       - "8004:8004"
     volumes:
