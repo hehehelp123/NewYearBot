@@ -182,12 +182,16 @@ services:
     image: selenium/standalone-firefox:latest
     container_name: selenium_firefox
     shm_size: 2g
+    environment:
+      SE_NODE_MAX_SESSIONS: 2
+      SE_NODE_OVERRIDE_MAX_SESSIONS: true
     ports:
       - "4444:4444"
       - "7900:7900"
     volumes:
       - ./selenium_downloads:/app/downloads
       - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile.default
+      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile1.default
     networks:
       - backend
     healthcheck:
@@ -273,7 +277,9 @@ services:
     ports:
       - "8003:8003"
     volumes:
+      - ./selenium_downloads:/app/downloads
       - ./wishlist_service/alembic/versions:/app/alembic/versions
+      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile1.default
     networks:
       - backend
     depends_on:

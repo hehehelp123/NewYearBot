@@ -6,6 +6,24 @@ from aiokafka.errors import KafkaConnectionError
 
 from app.api.v1.routers import router
 from app.kafka.producer import kafka_producer
+from app.kafka.consumer import KafkaConsumer
+import logging
+from app.services.scraper_service import scraper_service
+from app.services.selenium_downloader import selenium_downloader
+import asyncio
+
+logging.basicConfig(level = logging.INFO)
+logger = logging.getLogger(__name__)
+
+consumer = KafkaConsumer(
+    "wishlist.wishlist.add",
+    "wishlist.wishlist.create",
+    "wishlist.item.book",
+    "wishlist.item.unbook",
+    "wishlist.view.viewer",
+    "wishlist.view.owner",
+    "wishlist.item.delete",
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -22,6 +40,9 @@ async def lifespan(app: FastAPI):
         try:
             logging.info(f"Attempt {i + 1}/{max_retries} to connect to Kafka...")
             await kafka_producer.start()
+            await consumer.start()
+            logger.info("Scheduling background task for cookie export.")
+            asyncio.create_task(selenium_downloader.run_cookie_export_background())
             logging.info("✅ Kafka producer started successfully.")
             break
         except KafkaConnectionError as e:

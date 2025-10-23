@@ -14,7 +14,16 @@ async def lifespan(app: FastAPI):
         "ticket.created",
         "ticket.list.retrieved",
         "notification.schedule",
-        "notification.schedule.document"
+        "notification.schedule.document",
+        "ticket.ticket.created",
+        "wishlist.item.add_failed",
+        "wishlist.item.added",
+        "wishlist.item.book_failed",
+        "wishlist.item.booked",
+        "wishlist.item.deleted",
+        "wishlist.item.delete_failed",
+        "wishlist.view.viewer_failed",
+        "wishlist.view.owner_failed"
     )
     await consumer.start()
     scheduler_task = start_scheduler()

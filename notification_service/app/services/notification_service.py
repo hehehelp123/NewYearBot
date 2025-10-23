@@ -28,6 +28,7 @@ class NotificationService:
         if not chat_id and event_type not in ["ticket.list.retrieved"]:
              chat_id = event_data.get("chat_id")
              if not chat_id:
+                logger.warning(f"No chat_id or telegram_id found in event from topic {event_type}")
                 return
 
         if event_type == "user.user.created":
@@ -51,6 +52,53 @@ class NotificationService:
 
         elif event_type == "notification.schedule.document":
             await self._create_scheduled_document(event_data)
+
+        elif event_type == "wishlist.wishlist.created":
+            name = escape_markdown(event_data.get("name", "My Wishlist"))
+            message = f"🎉 Ваш вишлист '*__{name}__*' создан\\! Теперь вы можете добавлять в него товары\\."
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.added":
+            name = escape_markdown(event_data.get("name", "Новый товар"))
+            message = f"✅ Товар '*{name}*' добавлен в ваш вишлист\\."
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.add_failed":
+            url = escape_markdown(event_data.get("source_url", "URL"))
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось добавить товар с {url}\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.booked":
+            await self._handle_item_booked(event_data)
+
+        elif event_type == "wishlist.item.book_failed":
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось забронировать товар\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.unbooked":
+            await self._handle_item_unbooked(event_data)
+
+        elif event_type == "wishlist.item.unbook_failed":
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось снять бронь\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
+        
+        elif event_type == "wishlist.item.deleted":
+            name = escape_markdown(event_data.get("item_name", "Товар"))
+            message = f"✅ Товар '*{name}*' был успешно удален из вашего вишлиста\\."
+            await self._send_immediate(chat_id, message)
+
+        elif event_type == "wishlist.item.delete_failed":
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось удалить товар\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
+
+        elif event_type in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
+            reason = escape_markdown(event_data.get("reason", "Неизвестная ошибка"))
+            message = f"❗️ Не удалось загрузить вишлист\\.\n*Причина:* {reason}"
+            await self._send_immediate(chat_id, message)
 
     async def _handle_ticket_created(self, ticket: dict):
         user_id = ticket["telegram_id"]
@@ -105,6 +153,24 @@ class NotificationService:
         logger.info(f"Passing ticket list for user {user_id} to bot consumer.")
         payload = {"chat_id": user_id, "tickets": tickets}
         await kafka_producer.send("notification.send.tickets", payload)
+
+    async def _handle_item_booked(self, event_data: dict):
+        booker_id = event_data.get("telegram_id")
+        owner_id = event_data.get("owner_user_id")
+        item_name = escape_markdown(event_data.get("item_name", "Товар"))
+
+        if booker_id:
+            booker_message = f"🎉 Вы успешно забронировали '*__{item_name}__*'\\!"
+            await self._send_immediate(booker_id, booker_message)
+
+    async def _handle_item_unbooked(self, event_data: dict):
+        unbooker_id = event_data.get("telegram_id")
+        owner_id = event_data.get("owner_user_id")
+        item_name = escape_markdown(event_data.get("item_name", "Товар"))
+
+        if unbooker_id:
+            unbooker_message = f"✅ Вы сняли бронь с товара '*__{item_name}__*'\\."
+            await self._send_immediate(unbooker_id, unbooker_message)
 
     async def _schedule_text_reminder(self, user_id: int, ticket: dict, send_at: datetime, time_left: str):
         message = (
