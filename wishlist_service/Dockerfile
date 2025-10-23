@@ -24,6 +24,6 @@ COPY --from=builder /app/.venv ./.venv
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY src/ ./src/
+COPY app/ ./app/
 
 EXPOSE 8003
