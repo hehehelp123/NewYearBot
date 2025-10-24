@@ -33,8 +33,7 @@ class WishlistBrowser(StatesGroup):
 
 START_BUTTON = "🔄 Старт"
 
-# ЗАМЕНИ ЭТОТ ID НА ТОТ, ЧТО ПОЛУЧИШЬ ОТ БОТА
-WELCOME_IMAGE_FILE_ID = "PASTE_YOUR_FILE_ID_HERE"
+WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIbhS-7FY2lmbDJ-AQADAgADeAADNgQ"
 
 WELCOME_TEXT = (
     "Добро пожаловать на нашу новогоднюю вечеринку! 🎄✨\n\n"
@@ -121,18 +120,6 @@ async def welcome_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🚀 Поехали! (Главное меню)", callback_data="info:go_to_main_menu")
     builder.adjust(2, 1)
     return builder.as_markup()
-
-
-# --- ВРЕМЕННЫЙ ХЭНДЛЕР: НАЧАЛО ---
-# (Этот хэндлер нужно будет удалить после получения ID)
-async def get_photo_id_handler(message: Message):
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        logger.info(f"ПОЛУЧЕН FILE_ID: {file_id}")
-        await message.answer(f"Photo `file_id`:\n`{file_id}`", parse_mode="MarkdownV2")
-
-
-# --- ВРЕМЕННЫЙ ХЭНДЛЕР: КОНЕЦ ---
 
 
 async def start_handler(message: Message, state: FSMContext) -> None:
