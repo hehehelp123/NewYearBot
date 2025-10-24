@@ -22,7 +22,7 @@ class SeleniumUploader:
     @asynccontextmanager
     async def get_driver_session(self):
         driver: webdriver.Remote | None = None
-        logger.info("Запрос новой сессии драйвера Selenium...")
+        logger.info("Запрос новой сессии драйвера Selenium (Music)...")
         options = FirefoxOptions()
         options.add_argument("-profile")
         options.add_argument("/home/seluser/.mozilla/firefox/profile.default")
@@ -33,21 +33,21 @@ class SeleniumUploader:
 
         try:
             driver = webdriver.Remote(
-                command_executor=settings.SELENIUM_URL,
+                command_executor=settings.SELENIUM_URL_MUSIC,
                 options=options
             )
-            logger.info("Сессия Selenium успешно создана.")
+            logger.info("Сессия Selenium (Music) успешно создана.")
             yield driver
         except WebDriverException as e:
-            logger.error(f"Не удалось создать сессию Selenium: {e}", exc_info=True)
+            logger.error(f"Не удалось создать сессию Selenium (Music): {e}", exc_info=True)
             raise
         finally:
             if driver:
                 driver.quit()
-                logger.info("Сессия Selenium закрыта.")
+                logger.info("Сессия Selenium (Music) закрыта.")
 
     async def export_cookies(self, driver: webdriver.Remote):
-        logger.info("Начало стандартизированного экспорта cookies...")
+        logger.info("Начало стандартизированного экспорта cookies (Music)...")
 
         cookie_jar = http.cookiejar.MozillaCookieJar()
 
@@ -97,7 +97,7 @@ class SeleniumUploader:
 
         os.makedirs(os.path.dirname(COOKIE_FILE), exist_ok=True)
         cookie_jar.save(COOKIE_FILE, ignore_discard=True, ignore_expires=False)
-        logger.info(f"Cookies успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
+        logger.info(f"Cookies (Music) успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
 
     async def upload_track(self, driver: webdriver.Remote, track_path: str) -> bool:
         max_attempts = 3
