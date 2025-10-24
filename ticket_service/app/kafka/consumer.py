@@ -7,14 +7,14 @@ from aiokafka import AIOKafkaConsumer
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import AsyncSessionLocal
 from app.core.config import settings
-from app.services.ticket_service import TicketService
+from app.services.ticket_service import ticket_service
 from app.services.storage_service import storage_service
 from app.kafka.producer import kafka_producer
 
 logger = logging.getLogger(__name__)
 
 
-class KafkaConsumer:
+class KafkaTicketConsumer:
     def __init__(self, *topics: str):
         self.topics = topics
         self.consumer: AIOKafkaConsumer | None = None
@@ -95,7 +95,7 @@ class KafkaConsumer:
             temp_path = temp_file.name
             logger.info(f"Downloading file {object_name} to temporary path {temp_path}")
 
-            new_ticket = await TicketService.create_ticket(db, title, object_name, user_id, temp_path)
+            new_ticket = await ticket_service.create_ticket(db, title, object_name, user_id, temp_path)
 
         logger.info(f"File {object_name} downloaded successfully to {temp_path}.")
         await kafka_producer.send("ticket.created",
@@ -110,7 +110,7 @@ class KafkaConsumer:
             logger.warning(f"Invalid ticket.list.request payload: {value}")
             return
 
-        tickets = await TicketService.get_tickets_by_user(db, telegram_id)
+        tickets = await ticket_service.get_tickets_by_user(db, telegram_id)
         ticket_list = [t.to_schema().model_dump() for t in tickets]
         payload = {"telegram_id": telegram_id, "tickets": ticket_list}
         await kafka_producer.send("notification.send.tickets", payload)
@@ -124,7 +124,7 @@ class KafkaConsumer:
             logger.warning(f"Invalid ticket.download.request payload: {value}")
             return
 
-        ticket = await TicketService.get_ticket_by_id(db, ticket_id, telegram_id)
+        ticket = await ticket_service.get_ticket_by_id(db, ticket_id, telegram_id)
         if not ticket:
             await kafka_producer.send("notification.send",
                                       {"telegram_id": telegram_id, "message": f"Билет {ticket_id} не найден."})
@@ -147,7 +147,7 @@ class KafkaConsumer:
             logger.warning(f"Invalid ticket.delete.request payload: {value}")
             return
 
-        ticket = await TicketService.get_ticket_by_id(db, ticket_id, telegram_id)
+        ticket = await ticket_service.get_ticket_by_id(db, ticket_id, telegram_id)
         if not ticket:
             await kafka_producer.send("notification.send",
                                       {"telegram_id": telegram_id, "message": f"Билет {ticket_id} не найден."})
@@ -159,13 +159,13 @@ class KafkaConsumer:
         except Exception as e:
             logger.error(f"Failed to delete {ticket.storage_key} from MinIO: {e}")
 
-        await TicketService.delete_ticket(db, ticket)
+        await ticket_service.delete_ticket(db, ticket)
         logger.info(f"Deleted ticket {ticket_id} from DB.")
         await kafka_producer.send("notification.send",
                                   {"telegram_id": telegram_id, "message": f"Билет '{ticket.title}' удален."})
 
 
-kafka_consumer = KafkaConsumer(
+kafka_consumer = KafkaTicketConsumer(
     "ticket.create.requested",
     "ticket.list.request",
     "ticket.download.request",
