@@ -11,7 +11,7 @@ router = APIRouter()
 def get_wishlist_service_features():
     return [
         {
-            "name": "Вишлисты",
+            "name": "🎁 Вишлисты",
             "type": "menu",
             "items": [
                 {
