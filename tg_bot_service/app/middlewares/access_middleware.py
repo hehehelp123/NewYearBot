@@ -2,7 +2,6 @@ import logging
 from typing import Callable, Dict, Any, Awaitable, Set
 
 from aiogram import BaseMiddleware
-from aiogram.exceptions import CancelHandler
 from aiogram.types import Message
 
 from app.core.config import settings
@@ -50,4 +49,4 @@ class AccessMiddleware(BaseMiddleware):
 
         logger.warning(f"Access denied for {user_id}")
         await event.answer("Доступ запрещен. Обратитесь к администратору.")
-        raise CancelHandler()
+        return
