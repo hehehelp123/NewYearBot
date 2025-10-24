@@ -17,7 +17,7 @@ class StorageService:
         )
         logger.info("MinIO client initialized.")
 
-    def upload_file(self, file_bytes: bytes, original_filename: str, folder: str = "tickets") -> str:
+    def upload_file(self, file_bytes: bytes, original_filename: str, folder: str = "tickets", content_type: str = "application/octet-stream") -> str:
         try:
             object_name = f"{folder}/{uuid.uuid4()}-{original_filename}"
             self.client.put_object(
@@ -25,9 +25,9 @@ class StorageService:
                 object_name,
                 io.BytesIO(file_bytes),
                 len(file_bytes),
-                content_type='application/pdf'
+                content_type=content_type
             )
-            logger.info(f"File {original_filename} uploaded to MinIO as {object_name}")
+            logger.info(f"File {original_filename} (type: {content_type}) uploaded to MinIO as {object_name}")
             return object_name
         except Exception as e:
             logger.error(f"Failed to upload file from bytes: {e}", exc_info=True)

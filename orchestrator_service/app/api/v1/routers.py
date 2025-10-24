@@ -1,6 +1,9 @@
 import uuid
 import io
-from fastapi import APIRouter, Request, Form, UploadFile, File, HTTPException, status, Body
+import math
+import random
+from fastapi import APIRouter, Request, Form, UploadFile, File, HTTPException, status, Body, Query
+from fastapi.responses import StreamingResponse, Response
 from app.kafka.producer import kafka_producer
 from app.services.storage_service import storage_service
 from app.services.menu_service import menu_service
@@ -9,8 +12,6 @@ router = APIRouter()
 
 @router.get("/menu")
 async def get_menu(request: Request):
-    menu_tree, command_map = await menu_service.build_menu_tree()
-    request.app.state.menu_tree = menu_tree
     return request.app.state.menu_tree
 
 @router.post("/tickets")
@@ -55,9 +56,59 @@ async def handle_command(request: Request, command_path: str, payload: dict = Bo
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Command not found")
 
     await kafka_producer.send(topic, payload)
-    return {"status": "accepted"}
+    return {"status": "command_accepted", "topic": topic}
 
 
-@router.get("/")
-def read_root():
-    return {"service": "Orchestrator Service", "status": "ok"}
+@router.get("/albums/years")
+async def get_album_years():
+    return storage_service.list_folders("photos/")
+
+@router.get("/albums/{year}")
+async def get_album_media(
+    year: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(1, ge=1, le=5)
+):
+    folder = f"photos/{year}/"
+    all_media = storage_service.list_media(folder)
+
+    total_items = len(all_media)
+    if total_items == 0:
+        return {"items": [], "total_items": 0, "total_pages": 0, "page": 0}
+
+    total_pages = math.ceil(total_items / page_size)
+
+    start_index = (page - 1) * page_size
+    end_index = start_index + page_size
+
+    paginated_items = all_media[start_index:end_index]
+
+    return {
+        "items": paginated_items,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "page": page
+    }
+
+@router.get("/albums/{year}/random")
+async def get_random_album_media(year: int):
+    folder = f"photos/{year}/"
+    all_media = storage_service.list_media(folder)
+
+    total_items = len(all_media)
+    if total_items == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No media found in this album.")
+
+    random_index = random.randint(0, total_items - 1)
+
+    return {
+        "page": random_index + 1
+    }
+
+@router.get("/albums/media/{object_name:path}")
+async def download_album_media(object_name: str):
+    file_bytes, content_type = storage_service.download_file_as_bytes(object_name)
+    if file_bytes is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media file not found in storage.")
+
+    return Response(content=file_bytes, media_type=content_type)

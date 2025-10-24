@@ -1,3 +1,5 @@
+from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -11,6 +13,8 @@ class Settings(BaseSettings):
     MINIO_ROOT_USER: str
     MINIO_ROOT_PASSWORD: str
     MINIO_BUCKET: str
+
+    ADMIN_TELEGRAM_IDS: List[int] = []
 
     model_config = SettingsConfigDict(env_file=".env")
 

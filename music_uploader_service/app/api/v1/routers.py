@@ -11,7 +11,7 @@ def get_features():
     return {
         "menu": [
             {
-                "name": "Музыка",
+                "name": "🎶 Музыка",
                 "type": "menu",
                 "items": [
                     {

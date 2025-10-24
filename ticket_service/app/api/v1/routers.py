@@ -20,7 +20,7 @@ def get_features():
 
     visible_menu = [
         {
-            "name": "Билеты",
+            "name": "🎟 Билеты",
             "type": "menu",
             "items": [
                 {
