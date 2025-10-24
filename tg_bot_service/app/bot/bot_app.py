@@ -6,12 +6,13 @@ from datetime import datetime
 from aiogram import F, Bot
 from aiogram.types import (
     Message, ReplyKeyboardMarkup, KeyboardButton, Document, CallbackQuery,
-    InlineKeyboardButton, URLInputFile
+    InlineKeyboardButton, URLInputFile, PhotoSize, Video, InputMediaPhoto, InputMediaVideo
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardMarkup
 from aiogram.filters import StateFilter
+from aiogram.exceptions import TelegramBadRequest
 
 from app.core.config import settings
 from app.kafka.producer import kafka_producer
@@ -31,7 +32,21 @@ class WishlistBrowser(StatesGroup):
     browsing = State()
 
 
+class MediaUpload(StatesGroup):
+    waiting_for_year = State()
+    uploading = State()
+
+
+class AlbumBrowser(StatesGroup):
+    choosing_year = State()
+    browsing = State()
+
+
 START_BUTTON = "🔄 Старт"
+BACK_TO_WELCOME_BUTTON = "⬅️ Назад к приветствию"
+UPLOAD_MEDIA_BUTTON = "📸 Загрузить фото/видео"
+VIEW_ALBUMS_BUTTON = "🖼️ Смотреть альбомы"
+STOP_UPLOAD_BUTTON = "✅ Закончить загрузку"
 
 WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIbhS-7FY2lmbDJ-AQADAgADeAADNgQ"
 
@@ -50,6 +65,19 @@ def escape_markdown(text: str) -> str:
         return ""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f"({escape_chars})", r"\\\1", text)
+
+
+def get_current_new_year() -> Optional[int]:
+    now = datetime.now()
+    if now.month == 1 and now.day < 15:
+        return now.year - 1
+    if now.month == 12:
+        return now.year
+    return None
+
+
+def get_media_folder(year: int) -> str:
+    return f"photos/{year}"
 
 
 def get_schema_loader():
@@ -89,7 +117,8 @@ def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
     return None
 
 
-def build_menu_keyboard(item_names: List[str], add_start: bool = False) -> ReplyKeyboardMarkup:
+def build_menu_keyboard(item_names: List[str], add_start: bool = False,
+                        add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
     row, rows = [], []
     for i, name in enumerate(item_names, start=1):
         row.append(KeyboardButton(text=name))
@@ -97,7 +126,16 @@ def build_menu_keyboard(item_names: List[str], add_start: bool = False) -> Reply
             rows.append(row)
             row = []
     if row: rows.append(row)
-    if add_start: rows.append([KeyboardButton(text=START_BUTTON)])
+
+    bottom_buttons = []
+    if add_start:
+        bottom_buttons.append(KeyboardButton(text=START_BUTTON))
+    if add_back_to_welcome:
+        bottom_buttons.append(KeyboardButton(text=BACK_TO_WELCOME_BUTTON))
+
+    if bottom_buttons:
+        rows.append(bottom_buttons)
+
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
@@ -106,7 +144,9 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
     if message.text == START_BUTTON:
         await state.clear()
         item_names = await get_root_items()
-        kb = build_menu_keyboard(item_names)
+        item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+
+        kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
 
         await state.update_data(current_node=await load_schema())
         await message.answer("Выберите пункт меню:", reply_markup=kb)
@@ -140,6 +180,11 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
     kb = await welcome_keyboard()
 
+    if WELCOME_IMAGE_FILE_ID == "PASTE_YOUR_FILE_ID_HERE":
+        logger.warning("WELCOME_IMAGE_FILE_ID не установлен! Отправка фото будет пропущена.")
+        await message.answer(WELCOME_TEXT, reply_markup=kb)
+        return
+
     try:
         await message.answer_photo(
             photo=WELCOME_IMAGE_FILE_ID,
@@ -151,13 +196,20 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         await message.answer(WELCOME_TEXT, reply_markup=kb)
 
 
+async def back_to_welcome_handler(message: Message, state: FSMContext):
+    logger.debug(f"Возврат к приветствию для {message.from_user.id}")
+    await start_handler(message, state)
+
+
 async def show_main_menu_callback(query: CallbackQuery, state: FSMContext):
     await query.answer()
 
     item_names = await get_root_items()
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+
     if item_names:
         await state.update_data(current_node=await load_schema())
-        kb = build_menu_keyboard(item_names)
+        kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
         await query.message.answer("Добро пожаловать! Выберите пункт меню:", reply_markup=kb)
     else:
         await query.message.answer("Схема меню пуста или не найдена.")
@@ -221,7 +273,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         sub_names = [i.get("name") for i in sub_items if isinstance(i, Dict) and isinstance(i.get("name"), str)]
         if sub_names:
             await state.update_data(current_node=selected)
-            kb = build_menu_keyboard(sub_names, add_start=True)
+            kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=True)
             await message.answer("Выберите пункт меню:", reply_markup=kb)
         else:
             await message.answer("В этом меню нет пунктов.")
@@ -255,7 +307,7 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
             logger.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
             await message.answer(f"Ошибка: {e}")
         finally:
-            await reset_to_main_menu(message, state)
+            await reset_to_main_menu(message, state, is_action_finish=True)
     else:
         await state.set_state(ActionForm.waiting_for_field)
         await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
@@ -263,7 +315,7 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
         field_info = payload_schema[field_name]
         await message.answer(
             f"Введите '{field_info['description']}' ({field_info['type']}):",
-            reply_markup=build_menu_keyboard([], add_start=True)
+            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=True)
         )
 
 
@@ -289,7 +341,12 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
         file_bytes = await bot.download_file(file_info.file_path)
 
         try:
-            object_name = storage_service.upload_file(file_bytes.read(), doc.file_name)
+            object_name = storage_service.upload_file(
+                file_bytes.read(),
+                doc.file_name,
+                folder="tickets",
+                content_type=doc.mime_type or "application/pdf"
+            )
             collected_data[current_field_name] = object_name
             await message.answer("Файл успешно загружен.")
             logger.info(f"Файл {object_name} загружен в MinIO")
@@ -328,7 +385,7 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
             if (action.get("unfinished") == True):
                 logger.debug("Action помечен как 'unfinished', не сбрасываем меню.")
                 return
-            await reset_to_main_menu(message, state)
+            await reset_to_main_menu(message, state, is_action_finish=True)
 
 
 async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
@@ -371,14 +428,270 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
         await query.answer("Удаление отменено.")
 
 
-async def reset_to_main_menu(message: Message, state: FSMContext):
+async def reset_to_main_menu(message: Message, state: FSMContext, is_action_finish: bool = False):
     await state.clear()
     item_names = await get_root_items()
-    kb = build_menu_keyboard(item_names)
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+
+    kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
 
     await state.update_data(current_node=await load_schema())
-    await message.answer("Выберите пункт меню:", reply_markup=kb)
+
+    text = "Выберите пункт меню:"
+    if is_action_finish:
+        text = "Действие завершено. Выберите следующий пункт меню:"
+
+    await message.answer(text, reply_markup=kb)
     logger.debug(f"Сброс в главное меню для {message.from_user.id}")
+
+
+async def start_media_upload_handler(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} начал загрузку медиа.")
+
+    current_year = get_current_new_year()
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=STOP_UPLOAD_BUTTON)]],
+        resize_keyboard=True
+    )
+
+    if current_year:
+        await state.set_state(MediaUpload.uploading)
+        await state.update_data(year=current_year)
+        await message.answer(
+            f"Режим загрузки фото/видео для Нового Года **{current_year}** включен.\n"
+            "Отправляйте файлы (по одному или альбомом).\n"
+            "Когда закончите, нажмите кнопку внизу.",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    else:
+        await state.set_state(MediaUpload.waiting_for_year)
+        await message.answer(
+            "Сейчас не 'новогодний сезон'.\n"
+            "**Пожалуйста, введите год**, для которого вы хотите загрузить фото/видео (например, 2024).**",
+            reply_markup=build_menu_keyboard([], add_back_to_welcome=True),
+            parse_mode="Markdown"
+        )
+
+
+async def process_media_year_handler(message: Message, state: FSMContext):
+    if not message.text or not message.text.isdigit():
+        await message.answer("Пожалуйста, введите год в виде числа (например, 2024).")
+        return
+
+    year = int(message.text)
+    if not (2020 < year < 2030):
+        await message.answer("Пожалуйста, введите корректный год (с 2021 по 2029).")
+        return
+
+    logger.info(f"Пользователь {message.from_user.id} выбрал {year} год для загрузки.")
+    await state.set_state(MediaUpload.uploading)
+    await state.update_data(year=year)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=STOP_UPLOAD_BUTTON)]],
+        resize_keyboard=True
+    )
+    await message.answer(
+        f"Режим загрузки фото/видео для **{year}** включен.\n"
+        "Отправляйте файлы. Когда закончите, нажмите кнопку внизу.",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+
+async def stop_media_upload_handler(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} закончил загрузку медиа.")
+    await state.clear()
+    await message.answer("Вы вышли из режима загрузки.")
+    await reset_to_main_menu(message, state)
+
+
+async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
+    if not (message.photo or message.video):
+        await message.answer("Пожалуйста, отправьте фото или видео.")
+        return
+
+    data = await state.get_data()
+    year = data.get("year")
+    if not year:
+        logger.warning(f"Нет года в FSM для {message.from_user.id}. Сбрасываем.")
+        await stop_media_upload_handler(message, state)
+        return
+
+    file_id = ""
+    file_unique_id = ""
+    original_filename = ""
+    content_type = ""
+
+    if message.photo:
+        media = message.photo[-1]
+        file_id = media.file_id
+        file_unique_id = media.file_unique_id
+        content_type = "image/jpeg"
+        original_filename = f"{message.from_user.id}_{file_unique_id}.jpg"
+    elif message.video:
+        media = message.video
+        file_id = media.file_id
+        file_unique_id = media.file_unique_id
+        content_type = media.mime_type or "video/mp4"
+        original_filename = f"{message.from_user.id}_{file_unique_id}.{content_type.split('/')[-1]}"
+
+    logger.debug(f"Получено медиа {file_unique_id} от {message.from_user.id}")
+    await message.answer(f"Загружаю (ID: ...{file_unique_id[-6:]})...")
+
+    try:
+        file_info = await bot.get_file(file_id)
+        file_bytes_io = await bot.download_file(file_info.file_path)
+
+        folder = get_media_folder(year)
+
+        object_name = storage_service.upload_file(
+            file_bytes_io.read(),
+            original_filename,
+            folder=folder,
+            content_type=content_type
+        )
+        logger.info(f"Медиа {object_name} успешно загружено в {folder}")
+        await message.answer(f"✅ Файл ...{file_unique_id[-6:]} загружен!")
+
+    except Exception as e:
+        logger.error(f"Ошибка загрузки медиа {file_unique_id} в MinIO: {e}", exc_info=True)
+        await message.answer(f"❌ Произошла ошибка при загрузке ...{file_unique_id[-6:]}.")
+
+
+async def start_album_view_handler(message: Message, state: FSMContext):
+    logger.debug(f"Пользователь {message.from_user.id} запросил просмотр альбомов.")
+    await state.clear()
+
+    try:
+        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/years")
+        response.raise_for_status()
+        years = response.json()
+
+        if not years:
+            await message.answer("Пока нет ни одного загруженного альбома.")
+            return
+
+        await state.set_state(AlbumBrowser.choosing_year)
+        builder = InlineKeyboardBuilder()
+        for year in years:
+            builder.button(text=f"Альбом {year}", callback_data=f"album_year:{year}")
+        builder.button(text="❌ Закрыть", callback_data="album_close")
+        builder.adjust(2)
+
+        await message.answer("Выберите альбом для просмотра:", reply_markup=builder.as_markup())
+
+    except Exception as e:
+        logger.error(f"Не удалось получить список годов альбомов: {e}")
+        await message.answer("Не удалось загрузить список альбомов. Попробуйте позже.")
+
+
+async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
+    data = await state.get_data()
+    year = data.get("year")
+    page = data.get("page", 1)
+
+    try:
+        response = await http_client.client.get(
+            f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{year}",
+            params={"page": page, "page_size": 1}
+        )
+        response.raise_for_status()
+        album_data = response.json()
+
+        total_items = album_data.get("total_items", 0)
+        current_page = album_data.get("page", 1)
+        total_pages = album_data.get("total_pages", 0)
+        items = album_data.get("items", [])
+
+        if not items:
+            return "В этом альбоме нет медиа.", None
+
+        item = items[0]
+        media_url = item.get("url")
+        media_type = item.get("type", "photo")
+
+        caption = f"Альбом {year} | Файл {current_page} из {total_pages}"
+
+        builder = InlineKeyboardBuilder()
+        nav_buttons = []
+        if current_page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"album_page:{current_page - 1}"))
+
+        nav_buttons.append(InlineKeyboardButton(text="🎲 Случайно", callback_data="album_random"))
+
+        if current_page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"album_page:{current_page + 1}"))
+
+        builder.row(*nav_buttons)
+        builder.row(InlineKeyboardButton(text="Меню годов", callback_data="album_menu"),
+                    InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
+
+        media_input = InputMediaPhoto(media=media_url) if media_type == "photo" else InputMediaVideo(media=media_url)
+
+        return caption, builder.as_markup(), media_input, current_page
+
+    except Exception as e:
+        logger.error(f"Не удалось построить страницу альбома: {e}")
+        return "Ошибка загрузки альбома.", None, None, page
+
+
+async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    action, *value = query.data.split(":")
+
+    if action == "album_close":
+        await query.message.delete()
+        await state.clear()
+        return
+
+    if action == "album_menu":
+        await query.message.delete()
+        await start_album_view_handler(query.message, state)
+        return
+
+    await state.set_state(AlbumBrowser.browsing)
+
+    if action == "album_year":
+        year = int(value[0])
+        await state.update_data(year=year, page=1)
+
+    elif action == "album_page":
+        page = int(value[0])
+        await state.update_data(page=page)
+
+    elif action == "album_random":
+        data = await state.get_data()
+        year = data.get("year")
+        try:
+            response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{year}/random")
+            response.raise_for_status()
+            random_data = response.json()
+            new_page = random_data.get("page")
+            if new_page:
+                await state.update_data(page=new_page)
+        except Exception as e:
+            logger.error(f"Ошибка получения случайного медиа: {e}")
+            await query.message.answer("Не удалось загрузить случайный файл.")
+            return
+
+    caption, markup, media_input, new_page = await build_album_page(state, bot, query.from_user.id)
+
+    if media_input:
+        await state.update_data(page=new_page)
+        try:
+            await query.message.edit_media(media=media_input, reply_markup=markup)
+            if query.message.caption != caption:
+                await query.message.edit_caption(caption=caption, reply_markup=markup)
+        except TelegramBadRequest as e:
+            if "media is identical" in str(e):
+                if query.message.caption != caption:
+                    await query.message.edit_caption(caption=caption, reply_markup=markup)
+            else:
+                logger.error(f"Ошибка обновления медиа в альбоме: {e}")
+    else:
+        await query.message.edit_text(caption, reply_markup=markup)
 
 
 async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> (str, InlineKeyboardMarkup):
