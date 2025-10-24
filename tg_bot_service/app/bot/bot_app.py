@@ -168,12 +168,23 @@ async def show_info_callback(query: CallbackQuery):
 
     if action == "wifi":
         logger.debug(f"Пользователь {query.from_user.id} запросил WiFi")
-        await query.answer(f"Пароль от WiFi: {settings.WIFI_PASSWORD}", show_alert=True)
+        password = escape_markdown(settings.WIFI_PASSWORD)
+        await query.message.answer(
+            f"Пароль от WiFi:\n\n`{password}`",
+            parse_mode="MarkdownV2"
+        )
+        await query.answer()
 
     elif action == "admins":
         logger.debug(f"Пользователь {query.from_user.id} запросил контакты админов")
         builder = InlineKeyboardBuilder()
-        for name, user_id in settings.ADMINS_MAP.items():
+        admin_map = settings.ADMINS_MAP
+
+        if len(admin_map) == 1 and 1 in admin_map.values():
+            await query.answer("Ошибка: ADMIN_TELEGRAM_IDS не настроены в .env файле!", show_alert=True)
+            return
+
+        for name, user_id in admin_map.items():
             builder.button(text=name, url=f"tg://user?id={user_id}")
         builder.button(text="⬅️ Назад", callback_data="info:back_to_welcome")
         builder.adjust(1)
