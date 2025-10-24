@@ -1,4 +1,7 @@
+import logging
+from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     BOT_TOKEN: str
@@ -10,6 +13,26 @@ class Settings(BaseSettings):
     MINIO_ROOT_PASSWORD: str
     MINIO_BUCKET: str
 
+    WIFI_PASSWORD: str
+    ADMIN_TELEGRAM_IDS: List[int]
+
     model_config = SettingsConfigDict(env_file=".env")
+
+    @property
+    def ADMINS_MAP(self) -> dict:
+        ids = self.ADMIN_TELEGRAM_IDS
+        names = ["Миша", "Алина"]
+
+        admins = {}
+        for i, admin_id in enumerate(ids):
+            name = names[i] if i < len(names) else f"Admin {i + 1}"
+            admins[name] = admin_id
+
+        if not admins:
+            logging.warning("ADMIN_TELEGRAM_IDS не задан в .env")
+            return {"Администратор": 1}
+
+        return admins
+
 
 settings = Settings()
