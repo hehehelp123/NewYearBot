@@ -26,43 +26,22 @@ class MenuService:
         except httpx.RequestError as e:
             logger.error(f"Failed to fetch features from {url}: {e}")
             return None
+        except Exception as e:
+             logger.error(f"Error processing features from {url}: {e}")
+             return None
 
     def _process_item_for_command_map(self, item):
+        if not isinstance(item, dict): return
+
         if item.get("type") == "action" and "kafka_topic" in item:
             topic = item["kafka_topic"]
             command_path = topic.replace('.', '_')
             self.command_map[command_path] = topic
+            logger.debug(f"Mapped command path '{command_path}' to topic '{topic}'")
 
-        if "items" in item:
+        if "items" in item and isinstance(item["items"], list):
             for sub_item in item["items"]:
                 self._process_item_for_command_map(sub_item)
-
-    def _process_item_for_bot_menu(self, item):
-        if item.get("type") == "action" and "kafka_topic" in item:
-            command_path = item["kafka_topic"].replace('.', '_')
-            item["url"] = f"/api/v1/commands/{command_path}"
-            item["method"] = "POST"
-
-        if "items" in item:
-            for sub_item in item["items"]:
-                self._process_item_for_bot_menu(sub_item)
-
-    def _merge_trees(self, tree_list: list):
-        merged_tree = {"name": "Главное меню", "type": "menu", "items": []}
-        menu_map = {}
-
-        for tree in tree_list:
-            if not tree:
-                continue
-            for item in tree:
-                if item["type"] == "menu":
-                    if item["name"] not in menu_map:
-                        menu_map[item["name"]] = {"name": item["name"], "type": "menu", "items": []}
-                        merged_tree["items"].append(menu_map[item["name"]])
-                    menu_map[item["name"]]["items"].extend(item.get("items", []))
-                else:
-                    merged_tree["items"].append(item)
-        return merged_tree
 
     async def build_menu_tree(self):
         logger.info("Building menu tree and command map...")
@@ -76,25 +55,63 @@ class MenuService:
             if not response:
                 continue
 
-            if isinstance(response, dict) and "menu" in response:
-                all_menu_parts.append(response["menu"])
-                all_command_parts.extend(response.get("commands", []))
+            if isinstance(response, dict):
+                if "menu" in response and isinstance(response["menu"], list):
+                     all_menu_parts.append({"items": response["menu"]})
+                if "commands" in response and isinstance(response["commands"], list):
+                     all_command_parts.extend(response["commands"])
             elif isinstance(response, list):
-                all_menu_parts.append(response)
+                 all_menu_parts.append({"items": response})
+
+        admin_menu_part = {
+            "items": [
+                {
+                    "name": "🔑 Добавить юзера по ID", # Изменено название
+                    "type": "action",
+                    "kafka_topic": "user.user.allow_request",
+                    "admin_only": True,
+                    "payload": {
+                        # Запрашиваем ID как число
+                        "target_user_id": { "type": "integer", "description": "Telegram ID пользователя" }
+                    }
+                }
+            ]
+        }
+        all_menu_parts.append(admin_menu_part)
 
         self.command_map = {}
         for menu_part in all_menu_parts:
-            for item in menu_part:
-                self._process_item_for_command_map(item)
+             if isinstance(menu_part.get("items"), list):
+                for item in menu_part["items"]:
+                    self._process_item_for_command_map(item)
         for command in all_command_parts:
-            self._process_item_for_command_map(command)
+             self._process_item_for_command_map(command)
 
         self.menu_tree = self._merge_trees(all_menu_parts)
 
-        self._process_item_for_bot_menu(self.menu_tree)
-
-        logger.info(f"Menu tree built. Command map: {self.command_map}")
+        logger.info(f"Menu tree built. Command map contains {len(self.command_map)} entries.")
         return self.menu_tree, self.command_map
+
+    def _merge_trees(self, trees: list) -> dict:
+        merged_tree = {"items": []}
+        menu_map = {}
+
+        for tree in trees:
+             if not isinstance(tree, dict) or not isinstance(tree.get("items"), list): continue
+             for item in tree["items"]:
+                if not isinstance(item, dict) or "name" not in item: continue
+
+                if item["name"] in menu_map:
+                    existing_item = menu_map[item["name"]]
+                    if existing_item.get("type") == "menu" and item.get("type") == "menu":
+                        existing_item.setdefault("items", []).extend(item.get("items", []))
+                    else:
+                        logger.warning(f"Duplicate menu item '{item['name']}' found with different types or not menus. Skipping merge for this item.")
+                else:
+                    merged_tree["items"].append(item)
+                    menu_map[item["name"]] = item
+
+        return merged_tree
 
     async def close(self):
         await self.client.aclose()

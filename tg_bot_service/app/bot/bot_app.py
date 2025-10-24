@@ -1,7 +1,7 @@
 import logging
 import re
 import io
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from datetime import datetime
 
 from aiogram import F, Bot
@@ -21,6 +21,7 @@ from app.kafka.producer import kafka_producer
 from app.services.storage_service import storage_service
 from app.services.bot_service import bot_service
 from app.core.http_client import http_client
+from app.middlewares.access_middleware import allowed_user_ids # Импорт для проверки админа
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ BACK_TO_WELCOME_BUTTON = "⬅️ Ещё разок приветствие"
 UPLOAD_MEDIA_BUTTON = "📸 Загрузка нюдсов"
 VIEW_ALBUMS_BUTTON = "🖼️ Смотреть кто что загрузил"
 STOP_UPLOAD_BUTTON = "✅ Все чё мог то загрузил"
+ADMIN_ADD_USER_BUTTON = "🔑 Добавить юзера по ID"
 
 WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIbhS-7FY2lmbDJ-AQADAgADeAADNgQ"
 
@@ -56,25 +58,20 @@ WELCOME_TEXT = (
 )
 
 def escape_markdown(text: str) -> str:
-    if not isinstance(text, str):
-        return ""
+    if not isinstance(text, str): return ""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f"({escape_chars})", r"\\\1", text)
 
 def get_current_new_year() -> Optional[int]:
     now = datetime.now()
-    if now.month == 1 and now.day < 15:
-        return now.year
-    if now.month == 12:
-        return now.year + 1
+    if now.month == 1 and now.day < 15: return now.year
+    if now.month == 12: return now.year + 1
     return None
 
-def get_media_folder(year: int) -> str:
-    return f"photos/{year}"
+def get_media_folder(year: int) -> str: return f"photos/{year}"
 
 def get_schema_loader():
     schema_cache: Dict = {}
-
     async def load_schema(flag = 0) -> Dict:
         if schema_cache and flag == 0: return schema_cache
         try:
@@ -87,27 +84,32 @@ def get_schema_loader():
             logger.exception("Не удалось загрузить schema.json: %s", exc)
             schema_cache.clear()
             return schema_cache
-
     return load_schema
-
 
 load_schema = get_schema_loader()
 
-
-async def get_root_items() -> List[str]:
+async def get_root_items(user_id: int) -> List[str]:
+    """Возвращает список корневых кнопок, доступных пользователю."""
     schema = await load_schema()
     items = schema.get("items", [])
-    return [item.get("name") for item in items if isinstance(item, Dict) and isinstance(item.get("name"), str)]
+    is_admin = user_id in settings.ADMIN_TELEGRAM_IDS
+    return [
+        item.get("name") for item in items
+        if isinstance(item, Dict) and isinstance(item.get("name"), str)
+        and (not item.get("admin_only") or is_admin)
+    ]
 
-
-def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
+def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optional[Dict]:
+    """Ищет пункт меню по имени с учетом прав админа."""
     if not isinstance(node, Dict): return None
     children = node.get("items") or []
+    is_admin = user_id in settings.ADMIN_TELEGRAM_IDS
     for child in children:
         if isinstance(child, Dict) and child.get("name") == target_name:
+            if child.get("admin_only", False) and not is_admin:
+                continue
             return child
     return None
-
 
 def build_menu_keyboard(item_names: List[str], add_start: bool = True, add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
     rows = []
@@ -129,17 +131,17 @@ def build_menu_keyboard(item_names: List[str], add_start: bool = True, add_back_
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
-
 async def start_button_handler(message: Message, state: FSMContext) -> None:
     logger.debug(f"Нажата кнопка 'Куда я жмав' пользователем {message.from_user.id}")
-    await state.clear() # Сбрасываем любое состояние FSM
-    item_names = await get_root_items()
+    await state.clear()
+    user_id = message.from_user.id
+
+    item_names = await get_root_items(user_id) # Получаем доступные кнопки
     item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
 
-    # Основное меню: Не добавляем кнопку "Старт" (add_start=False), но добавляем "Назад к приветствию"
     kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
-
-    await state.update_data(current_node=await load_schema())
+    schema = await load_schema() # Загружаем полную схему для FSM
+    await state.update_data(current_node=schema)
     await message.answer("Ну кликни шо-нить:", reply_markup=kb)
     return
 
@@ -155,7 +157,6 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     await load_schema(flag=1)
     await state.clear()
     user = message.from_user
-
     logger.info(f"Запуск /start для пользователя {user.id} ({user.username})")
 
     if user:
@@ -167,213 +168,154 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         except Exception as e:
             logger.error(f"Ошибка отправки Kafka-сообщений при /start для {user.id}: {e}")
 
-    kb = await welcome_keyboard()
-
-    if WELCOME_IMAGE_FILE_ID == "PASTE_YOUR_FILE_ID_HERE":
-        logger.warning("WELCOME_IMAGE_FILE_ID не установлен! Отправка фото будет пропущена.")
-        await message.answer(WELCOME_TEXT, reply_markup=kb)
+    is_admin = user.id in settings.ADMIN_TELEGRAM_IDS
+    if not is_admin and user.id not in allowed_user_ids:
+        logger.warning(f"Пользователь {user.id} нажал /start, но не имеет доступа.")
+        await message.answer("Привет! Для доступа к боту обратись к администратору.")
         return
 
-    try:
-        await message.answer_photo(
-            photo=WELCOME_IMAGE_FILE_ID,
-            caption=WELCOME_TEXT,
-            reply_markup=kb
-        )
-    except Exception as e:
-        logger.error(f"Не удалось отправить фото по FILE_ID ({WELCOME_IMAGE_FILE_ID}): {e}. Попробуем отправить текст.")
+    kb = await welcome_keyboard()
+    if WELCOME_IMAGE_FILE_ID == "PASTE_YOUR_FILE_ID_HERE":
+        logger.warning("WELCOME_IMAGE_FILE_ID не установлен!")
         await message.answer(WELCOME_TEXT, reply_markup=kb)
-
+        return
+    try:
+        await message.answer_photo(photo=WELCOME_IMAGE_FILE_ID, caption=WELCOME_TEXT, reply_markup=kb)
+    except Exception as e:
+        logger.error(f"Не удалось отправить фото по FILE_ID: {e}.")
+        await message.answer(WELCOME_TEXT, reply_markup=kb)
 
 async def back_to_welcome_handler(message: Message, state: FSMContext):
     logger.debug(f"Возврат к приветствию для {message.from_user.id}")
     await start_handler(message, state)
 
-
 async def show_main_menu_callback(query: CallbackQuery, state: FSMContext):
     await query.answer()
-
-    item_names = await get_root_items()
+    user_id = query.from_user.id
+    item_names = await get_root_items(user_id) # Получаем доступные кнопки
     item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
 
     if item_names:
-        await state.update_data(current_node=await load_schema())
+        schema = await load_schema()
+        await state.update_data(current_node=schema)
         kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
-        await query.message.answer("Доброе утро, мопсы! Выберите пункт меню (или просто посмотрите какие кайфовые тут смайлики, долго выбирал):", reply_markup=kb)
+        await query.message.answer("Доброе утро, мопсы! Выберите пункт меню...", reply_markup=kb)
     else:
         await query.message.answer("Схема меню пуста или не найдена.")
 
 async def show_info_callback(query: CallbackQuery):
     action = query.data.split(":")[-1]
-
     if action == "wifi":
-        logger.debug(f"Пользователь {query.from_user.id} запросил WiFi")
         password = escape_markdown(settings.WIFI_PASSWORD)
-        await query.message.answer(
-            f"Пароль от WiFi:\n\n`{password}`",
-            parse_mode="MarkdownV2"
-        )
+        await query.message.answer(f"Пароль от WiFi:\n\n`{password}`", parse_mode="MarkdownV2")
         await query.answer()
-
     elif action == "admins":
-        logger.debug(f"Пользователь {query.from_user.id} запросил контакты админов")
-        builder = InlineKeyboardBuilder()
-        admin_map = settings.ADMINS_MAP
-
+        builder = InlineKeyboardBuilder(); admin_map = settings.ADMINS_MAP
         if len(admin_map) == 1 and 1 in admin_map.values():
-            await query.answer("Ошибка: ADMIN_TELEGRAM_IDS не настроены в .env файле!", show_alert=True)
-            return
-
-        for name, user_id in admin_map.items():
-            builder.button(text=name, url=f"tg://user?id={user_id}")
-        builder.button(text="⬅️ Куда я жмав...", callback_data="info:back_to_welcome")
-        builder.adjust(1)
-
-        await query.message.edit_caption(
-            caption="Жабы со стажем, все вопросы к жабам (за эксзистенциальные будете наказаны).",
-            reply_markup=builder.as_markup()
-        )
+            await query.answer("Ошибка: ADMIN_TELEGRAM_IDS не настроены!", show_alert=True); return
+        for name, user_id in admin_map.items(): builder.button(text=name, url=f"tg://user?id={user_id}")
+        builder.button(text="⬅️ Куда я жмав...", callback_data="info:back_to_welcome"); builder.adjust(1)
+        await query.message.edit_caption(caption="Жабы со стажем...", reply_markup=builder.as_markup())
         await query.answer()
-
     elif action == "back_to_welcome":
-        logger.debug(f"Пользователь {query.from_user.id} вернулся в стартовое меню")
         kb = await welcome_keyboard()
-        await query.message.edit_caption(
-            caption=WELCOME_TEXT,
-            reply_markup=kb
-        )
+        await query.message.edit_caption(caption=WELCOME_TEXT, reply_markup=kb)
         await query.answer()
-
 
 async def menu_handler(message: Message, state: FSMContext) -> None:
     if not message.text or not message.from_user: return
     logger.debug(f"Меню-хэндлер: {message.text} от {message.from_user.id}")
+    data = await state.get_data(); current_node = data.get("current_node", await load_schema())
+    selected = find_item_by_name(message.text, current_node, message.from_user.id) # Проверка прав тут
 
-    data = await state.get_data()
-    current_node = data.get("current_node", await load_schema())
-    selected = find_item_by_name(message.text, current_node)
     if selected is None:
-        await message.answer(f"Пункт '{message.text}' ты здесь не найдешь. Давай че-нить другое.")
+        is_admin_button = any(item.get("name") == message.text and item.get("admin_only") for item in current_node.get("items", []) if isinstance(item, dict))
+        if is_admin_button: await message.answer("Эта кнопка только для админов.")
+        else: await message.answer(f"Пункт '{message.text}' ты здесь не найдешь.")
         return
 
     if selected.get("type") == "menu":
-        sub_items = selected.get("items") or []
-        sub_names = [i.get("name") for i in sub_items if isinstance(i, Dict) and isinstance(i.get("name"), str)]
+        sub_items = selected.get("items") or []; is_admin = message.from_user.id in settings.ADMIN_TELEGRAM_IDS
+        sub_names = [i.get("name") for i in sub_items if isinstance(i, Dict) and isinstance(i.get("name"), str) and (not i.get("admin_only") or is_admin)]
         if sub_names:
             await state.update_data(current_node=selected)
             kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=True)
             await message.answer("Кликай!", reply_markup=kb)
-        else:
-            await message.answer("Ну и как ты сюда попал?..")
+        else: await message.answer("В этом подменю нет доступных пунктов.")
         return
 
-    if selected.get("type") == "action":
-        await start_form_action(selected, message, state)
-
+    if selected.get("type") == "action": await start_form_action(selected, message, state)
 
 async def start_form_action(action: dict, message: Message, state: FSMContext):
-    payload_schema = action.get("payload", {})
-    fields = list(payload_schema.keys())
-
+    payload_schema = action.get("payload", {}); fields = list(payload_schema.keys())
     logger.info(f"Запуск action: {action.get('name')} для {message.from_user.id}")
-
     if not fields:
-        collected_data = {}
-        if message.from_user:
-            collected_data["telegram_id"] = message.from_user.id
-
+        collected_data = {"telegram_id": message.from_user.id}
+        if action.get("kafka_topic") == "user.user.allow_request":
+             logger.error("Action 'user.user.allow_request' требует payload, но он пуст в схеме.")
+             await message.answer("Ошибка конфигурации: действие требует ввода данных.")
+             await reset_to_main_menu(message, state); return
         await message.answer("Ля, погодь, я думаю...")
-
         try:
-            kafka_topic = action.get("kafka_topic")
-            if not kafka_topic:
-                raise ValueError("В схеме не указан kafka_topic для этого действия")
-
+            kafka_topic = action.get("kafka_topic");
+            if not kafka_topic: raise ValueError("В схеме не указан kafka_topic")
             await kafka_producer.send(kafka_topic, collected_data)
-            logger.info(f"Action {kafka_topic} (no fields) отправлен в Kafka")
-        except Exception as e:
-            logger.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
-            await message.answer(f"Ошибка: {e}")
-        finally:
-            await reset_to_main_menu(message, state, is_action_finish=True)
-    else:
+            logger.info(f"Action {kafka_topic} (no fields) отправлен")
+        except Exception as e: logger.error(f"Ошибка Kafka: {e}", exc_info=True); await message.answer(f"Ошибка: {e}")
+        finally: await reset_to_main_menu(message, state, is_action_finish=True)
+    else: # Action с полями
         await state.set_state(ActionForm.waiting_for_field)
         await state.update_data(action=action, fields=fields, current_field_index=0, collected_data={})
-        field_name = fields[0]
-        field_info = payload_schema[field_name]
+        field_name = fields[0]; field_info = payload_schema[field_name]
         await message.answer(
             f"Введите '{field_info['description']}' ({field_info['type']}):",
-            # Клавиатура для ввода данных теперь всегда включает кнопку "Куда я жмав"
-            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=False)
+            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=False) # Только кнопка сброса
         )
 
-
 async def process_action_field(message: Message, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    action = data["action"]
-    fields = data["fields"]
-    current_field_idx = data["current_field_index"]
-    collected_data = data["collected_data"]
-    current_field_name = fields[current_field_idx]
-    field_info = action["payload"][current_field_name]
+    data = await state.get_data(); action = data["action"]; fields = data["fields"]
+    current_field_idx = data["current_field_index"]; collected_data = data["collected_data"]
+    current_field_name = fields[current_field_idx]; field_info = action["payload"][current_field_name]
     field_type = field_info.get("type")
-
     logger.debug(f"Обработка поля {current_field_name} (тип: {field_type}) для {message.from_user.id}")
 
+    input_value = None
     if field_type == "file":
-        if not message.document:
-            await message.answer("Кинь файлик")
-            return
-        doc = message.document
-        await message.answer(f"Кроду '{doc.file_name}' на сервер...")
-        file_info = await bot.get_file(doc.file_id)
-        file_bytes = await bot.download_file(file_info.file_path)
-
+        if not message.document: await message.answer("Кинь файлик"); return
+        doc = message.document; await message.answer(f"Кроду '{doc.file_name}'...")
+        file_info = await bot.get_file(doc.file_id); file_bytes = await bot.download_file(file_info.file_path)
         try:
-            object_name = storage_service.upload_file(
-                file_bytes.read(),
-                doc.file_name,
-                folder="tickets",
-                content_type=doc.mime_type or "application/pdf"
-            )
-            collected_data[current_field_name] = object_name
-            await message.answer("Файлик успешно национализирован.")
-            logger.info(f"Файл {object_name} загружен в MinIO")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки файла в MinIO: {e}", exc_info=True)
-            await message.answer("Плохой файл, у меня от него живот болит, чет не то.")
-            return
-
+            input_value = storage_service.upload_file(file_bytes.read(), doc.file_name, folder="tickets", content_type=doc.mime_type or "application/pdf")
+            await message.answer("Файлик успешно национализирован."); logger.info(f"Файл {input_value} загружен")
+        except Exception as e: logger.error(f"Ошибка MinIO: {e}", exc_info=True); await message.answer("Плохой файл..."); return
+    elif field_type == "integer":
+        if not message.text or not message.text.isdigit():
+             await message.answer("Нужно ввести число (ID пользователя)."); return
+        input_value = int(message.text)
     else:
-        if not message.text:
-            await message.answer("Букавы пиши.")
-            return
-        collected_data[current_field_name] = message.text
+        if not message.text: await message.answer("Букавы пиши."); return
+        input_value = message.text
+
+    collected_data[current_field_name] = input_value
 
     next_field_idx = current_field_idx + 1
     if next_field_idx < len(fields):
         await state.update_data(current_field_index=next_field_idx, collected_data=collected_data)
-        next_field_name = fields[next_field_idx]
-        next_field_info = action["payload"][next_field_name]
+        next_field_name = fields[next_field_idx]; next_field_info = action["payload"][next_field_name]
         await message.answer(f"Введите '{next_field_info['description']}' ({next_field_info['type']}):")
     else:
         if message.from_user: collected_data["telegram_id"] = message.from_user.id
-
+        if action.get("kafka_topic") == "user.user.allow_request":
+             collected_data["admin_id"] = message.from_user.id
         try:
             kafka_topic = action.get("kafka_topic")
-            if not kafka_topic:
-                raise ValueError("В схеме не указан kafka_topic для этого действия")
-
-            logger.info(f"Action {kafka_topic} (с полями) готов к отправке в Kafka")
+            if not kafka_topic: raise ValueError("В схеме не указан kafka_topic")
+            logger.info(f"Action {kafka_topic} (с полями) готов к отправке: {collected_data}")
             await kafka_producer.send(kafka_topic, collected_data)
             await message.answer("Я подумаю над этим на досуге.")
-        except Exception as e:
-            logger.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
-            await message.answer(f"Ошибка: {e}")
+        except Exception as e: logger.error(f"Ошибка Kafka: {e}", exc_info=True); await message.answer(f"Ошибка: {e}")
         finally:
-            if (action.get("unfinished") == True):
-                logger.debug("Action помечен как 'unfinished', не сбрасываем меню.")
-                return
+            if (action.get("unfinished") == True): logger.debug("Action 'unfinished'"); return
             await reset_to_main_menu(message, state, is_action_finish=True)
 
 

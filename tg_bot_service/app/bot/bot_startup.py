@@ -11,12 +11,14 @@ from app.core.config import settings
 from app.core.http_client import http_client
 from app.kafka.consumer import KafkaBotConsumer
 from app.kafka.producer import kafka_producer
+from app.middlewares.access_middleware import AccessMiddleware
 from app.bot.bot_app import (
     START_BUTTON,
     BACK_TO_WELCOME_BUTTON,
     UPLOAD_MEDIA_BUTTON,
     VIEW_ALBUMS_BUTTON,
     STOP_UPLOAD_BUTTON,
+    ADMIN_ADD_USER_BUTTON,
     ActionForm,
     WishlistBrowser,
     MediaUpload,
@@ -49,6 +51,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.bot = bot
     dp = Dispatcher()
 
+    dp.update.outer_middleware(AccessMiddleware())
+
     await kafka_producer.start()
 
     topics_to_consume = [
@@ -59,6 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "wishlist.view.viewer_success",
         "wishlist.view.owner_failed",
         "wishlist.view.viewer_failed",
+        "user.user.allowed",
+        # "user.user.disallowed",   # На будущее
     ]
 
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)
@@ -67,62 +73,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logging.info("Starting aiogram bot registration...")
     dp.message.register(start_button_handler, F.text == START_BUTTON, StateFilter("*"))
 
-    dp.callback_query.register(
-        wishlist_navigation_handler,
-        StateFilter(WishlistBrowser.browsing)
-    )
-    dp.callback_query.register(
-        album_navigation_handler,
-        StateFilter(AlbumBrowser)
-    )
+    dp.callback_query.register(wishlist_navigation_handler, StateFilter(WishlistBrowser.browsing))
+    dp.callback_query.register(album_navigation_handler, StateFilter(AlbumBrowser))
 
-    dp.message.register(
-        process_action_field,
-        StateFilter(ActionForm.waiting_for_field),
-        F.text | F.document
-    )
-    dp.message.register(
-        stop_media_upload_handler,
-        StateFilter(MediaUpload.uploading),
-        F.text == STOP_UPLOAD_BUTTON
-    )
-    dp.message.register(
-        media_upload_handler,
-        StateFilter(MediaUpload.uploading),
-        F.photo | F.video
-    )
-    dp.message.register(
-        process_media_year_handler,
-        StateFilter(MediaUpload.waiting_for_year),
-        F.text
-    )
+    dp.message.register(process_action_field, StateFilter(ActionForm.waiting_for_field), F.text | F.document)
+    dp.message.register(stop_media_upload_handler, StateFilter(MediaUpload.uploading), F.text == STOP_UPLOAD_BUTTON)
+    dp.message.register(media_upload_handler, StateFilter(MediaUpload.uploading), F.photo | F.video)
+    dp.message.register(process_media_year_handler, StateFilter(MediaUpload.waiting_for_year), F.text)
 
     dp.message.register(start_handler, F.text == "/start")
-    dp.message.register(
-        back_to_welcome_handler,
-        F.text == BACK_TO_WELCOME_BUTTON
-    )
-    dp.message.register(
-        start_media_upload_handler,
-        F.text == UPLOAD_MEDIA_BUTTON
-    )
-    dp.message.register(
-        start_album_view_handler,
-        F.text == VIEW_ALBUMS_BUTTON
-    )
+    dp.message.register(back_to_welcome_handler, F.text == BACK_TO_WELCOME_BUTTON)
+    dp.message.register(start_media_upload_handler, F.text == UPLOAD_MEDIA_BUTTON)
+    dp.message.register(start_album_view_handler, F.text == VIEW_ALBUMS_BUTTON)
 
-    dp.callback_query.register(
-        show_main_menu_callback,
-        F.data == "info:go_to_main_menu"
-    )
-    dp.callback_query.register(
-        show_info_callback,
-        F.data.startswith("info:")
-    )
-    dp.callback_query.register(
-        callback_query_handler,
-        F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:"))
-    )
+    dp.callback_query.register(show_main_menu_callback, F.data == "info:go_to_main_menu")
+    dp.callback_query.register(show_info_callback, F.data.startswith("info:"))
+    dp.callback_query.register(callback_query_handler, F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))
 
     dp.message.register(menu_handler, F.text)
 
