@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     YANDEX_MUSIC_TOKEN: str
     YANDEX_USER_LOGIN: str
     YANDEX_DESTINATION_PLAYLIST_NAME: str
-    SELENIUM_URL: str
+    SELENIUM_URL_MUSIC: str
     SELENIUM_PLAYLIST_URL: str
 
     model_config = SettingsConfigDict(env_file=".env")

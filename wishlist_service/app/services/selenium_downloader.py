@@ -24,40 +24,41 @@ class SeleniumDownloader:
     @asynccontextmanager
     async def get_driver_session(self):
         driver: webdriver.Remote | None = None
-        logger.info("Запрос новой сессии драйвера Selenium...")
+        logger.info("Запрос новой сессии драйвера Selenium (Wishlist)...")
         options = FirefoxOptions()
-        options.profile = "/home/seluser/.mozilla/firefox/profile1.default"
+        options.add_argument("-profile")
+        options.add_argument("/home/seluser/.mozilla/firefox/profile.default")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
 
         try:
             driver = webdriver.Remote(
-                command_executor=settings.SELENIUM_URL,
+                command_executor=settings.SELENIUM_URL_WISHLIST,
                 options=options
             )
-            logger.info("Сессия Selenium успешно создана.")
+            logger.info("Сессия Selenium (Wishlist) успешно создана.")
             yield driver
         except WebDriverException as e:
-            logger.error(f"Не удалось создать сессию Selenium: {e}", exc_info=True)
+            logger.error(f"Не удалось создать сессию Selenium (Wishlist): {e}", exc_info=True)
             raise
         finally:
             if driver:
                 driver.quit()
-                logger.info("Сессия Selenium закрыта.")
+                logger.info("Сессия Selenium (Wishlist) закрыта.")
 
 
     async def run_cookie_export_background(self):
-        logger.info("BACKGROUND TASK: Starting cookie export...")
+        logger.info("BACKGROUND TASK: Starting cookie export (Wishlist)...")
         try:
             async with self.get_driver_session() as driver:
                 await self.export_cookies(driver)
-            logger.info("BACKGROUND TASK: Cookie export finished successfully.")
+            logger.info("BACKGROUND TASK: Cookie export (Wishlist) finished successfully.")
         except Exception as e:
-            logger.error(f"BACKGROUND TASK: Cookie export failed: {e}", exc_info=True)
+            logger.error(f"BACKGROUND TASK: Cookie export (Wishlist) failed: {e}", exc_info=True)
 
     async def export_cookies(self, driver: webdriver.Remote):
-        logger.info("Начало стандартизированного экспорта cookies...")
+        logger.info("Начало стандартизированного экспорта cookies (Wishlist)...")
 
         cookie_jar = http.cookiejar.MozillaCookieJar()
 
@@ -77,7 +78,7 @@ class SeleniumDownloader:
         unique_cookies_dicts = {f"{c.get('domain', '')}_{c.get('name', '')}": c for c in all_cookies_dicts}.values()
 
         if not unique_cookies_dicts:
-            logger.warning("Не найдено ни одного cookie для экспорта.")
+            logger.warning("Не найдено ни одного cookie для экспорта (Wishlist).")
             return
 
         for cookie_dict in unique_cookies_dicts:
@@ -107,6 +108,6 @@ class SeleniumDownloader:
 
         os.makedirs(os.path.dirname(COOKIE_FILE), exist_ok=True)
         cookie_jar.save(COOKIE_FILE, ignore_discard=True, ignore_expires=False)
-        logger.info(f"Cookies успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
+        logger.info(f"Cookies (Wishlist) успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
 
 selenium_downloader = SeleniumDownloader()
