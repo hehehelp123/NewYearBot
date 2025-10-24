@@ -26,7 +26,8 @@ class SeleniumDownloader:
         driver: webdriver.Remote | None = None
         logger.info("Запрос новой сессии драйвера Selenium (Wishlist)...")
         options = FirefoxOptions()
-        options.profile = "/home/seluser/.mozilla/firefox/profile.default"
+        options.add_argument("-profile")
+        options.add_argument("/home/seluser/.mozilla/firefox/profile.default")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
