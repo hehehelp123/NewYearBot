@@ -22,8 +22,7 @@ from app.bot.bot_app import (
     start_handler,
     wishlist_navigation_handler,
     show_main_menu_callback,
-    show_info_callback,
-    get_photo_id_handler
+    show_info_callback
 )
 
 
