@@ -111,22 +111,28 @@ def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
 
 
 def build_menu_keyboard(item_names: List[str], add_start: bool = False, add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
-    row, rows = [], []
-    for i, name in enumerate(item_names, start=1):
+    rows = []
+    row = []
+    # Сначала добавляем все динамические и статичные кнопки меню
+    all_items = list(item_names) # Создаем копию, чтобы не менять исходный список
+
+    for i, name in enumerate(all_items):
         row.append(KeyboardButton(text=name))
-        if i % 2 == 0:
+        if len(row) == 2: # Как только в ряду 2 кнопки, добавляем ряд
             rows.append(row)
             row = []
-    if row: rows.append(row)
+    if row: # Добавляем последний ряд, если он неполный
+        rows.append(row)
 
-    bottom_buttons = []
+    # Отдельно добавляем нижние кнопки (Старт и Назад), если они нужны
+    bottom_buttons_row = []
     if add_start:
-        bottom_buttons.append(KeyboardButton(text=START_BUTTON))
+        bottom_buttons_row.append(KeyboardButton(text=START_BUTTON))
     if add_back_to_welcome:
-        bottom_buttons.append(KeyboardButton(text=BACK_TO_WELCOME_BUTTON))
+        bottom_buttons_row.append(KeyboardButton(text=BACK_TO_WELCOME_BUTTON))
 
-    if bottom_buttons:
-        rows.append(bottom_buttons)
+    if bottom_buttons_row:
+        rows.append(bottom_buttons_row) # Эти кнопки всегда в отдельном ряду
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
@@ -606,7 +612,6 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         object_name = item.get("object_name")
         media_type = item.get("type", "photo")
 
-        # Download media bytes from orchestrator
         media_response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/media/{object_name}")
         media_response.raise_for_status()
         media_bytes = media_response.content
@@ -652,7 +657,7 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
         return
 
     await state.set_state(AlbumBrowser.browsing)
-    await state.update_data(message_id=query.message.message_id) # Save message_id for editing
+    await state.update_data(message_id=query.message.message_id)
 
     if action == "album_year":
         year = int(value[0])
@@ -682,14 +687,13 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
     if media_input:
         await state.update_data(page=new_page)
         try:
-            # Need to use edit_message_media for changing photo/video
             await bot.edit_message_media(
                 media=media_input,
                 chat_id=query.message.chat.id,
                 message_id=query.message.message_id,
                 reply_markup=markup
             )
-            # edit_message_caption might be needed if caption changes and media doesn't
+
             await bot.edit_message_caption(
                  chat_id=query.message.chat.id,
                  message_id=query.message.message_id,
@@ -698,7 +702,7 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
             )
         except TelegramBadRequest as e:
             if "message is not modified" in str(e):
-                 pass # Ignore if nothing changed
+                 pass
             elif "message can't be edited" in str(e):
                  logger.warning(f"Сообщение {query.message.message_id} слишком старое для редактирования.")
                  await query.message.answer("Сообщение слишком старое, не могу обновить.")
@@ -706,18 +710,16 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
                  logger.warning(f"Сообщение {query.message.message_id} не найдено для редактирования.")
             else:
                 logger.error(f"Ошибка обновления медиа в альбоме: {e}")
-                # Fallback: Send a new message if editing fails badly
                 try:
                     await query.message.answer("Не удалось обновить предыдущее сообщение, показываю текущий файл.")
                     if isinstance(media_input, InputMediaPhoto):
-                        await query.message.answer_photo(media_input.media, caption=caption, reply_markup=markup)
+                        await query.message.answer_photo(media_input.media.file, caption=caption, reply_markup=markup)
                     else:
-                        await query.message.answer_video(media_input.media, caption=caption, reply_markup=markup)
+                        await query.message.answer_video(media_input.media.file, caption=caption, reply_markup=markup)
                 except Exception as send_err:
                      logger.error(f"Не удалось даже отправить новое сообщение: {send_err}")
 
     else:
-        # If no media (e.g., error or empty album), edit the text
         try:
             await query.message.edit_text(caption, reply_markup=markup)
         except TelegramBadRequest as e:
