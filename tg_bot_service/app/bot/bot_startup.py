@@ -22,7 +22,8 @@ from app.bot.bot_app import (
     start_handler,
     wishlist_navigation_handler,
     show_main_menu_callback,
-    show_info_callback
+    show_info_callback,
+    get_photo_id_handler
 )
 
 
@@ -53,11 +54,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logging.info("Starting aiogram bot registration...")
 
+    # Регистрация Callback Query Handlers (в порядке от частного к общему)
+
+    # 1. Хэндлеры для FSM состояний
     dp.callback_query.register(
         wishlist_navigation_handler,
         StateFilter(WishlistBrowser.browsing)
     )
 
+    # 2. Новые хэндлеры для стартового экрана
     dp.callback_query.register(
         show_main_menu_callback,
         F.data == "info:go_to_main_menu"
@@ -67,11 +72,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         F.data.startswith("info:")
     )
 
+    # 3. Хэндлеры для билетов
     dp.callback_query.register(
         callback_query_handler,
         F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:"))
     )
 
+    # Регистрация Message Handlers
+
+    # 1. Хэндлеры для FSM состояний
     dp.message.register(
         process_action_field,
         StateFilter(ActionForm.waiting_for_field),
@@ -82,6 +91,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(start_button_handler, F.text == START_BUTTON)
     dp.message.register(start_handler, F.text == "/start")
 
+    # --- ВРЕМЕННАЯ РЕГИСТРАЦИЯ: НАЧАЛО ---
+    # (Эту строку нужно будет удалить)
+    dp.message.register(get_photo_id_handler, F.photo)
+    # --- ВРЕМЕННАЯ РЕГИСТРАЦИЯ: КОНЕЦ ---
+
+    # 3. Хэндлер для текстовых сообщений (обработка меню) - должен быть последним
     dp.message.register(menu_handler, F.text)
 
     logging.info("Handlers registered. Starting polling...")

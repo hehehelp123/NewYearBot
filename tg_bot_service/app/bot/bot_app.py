@@ -32,7 +32,10 @@ class WishlistBrowser(StatesGroup):
 
 
 START_BUTTON = "🔄 Старт"
-WELCOME_IMAGE_URL = "https://i.imgur.com/83nC4gW.png"
+
+# ЗАМЕНИ ЭТОТ ID НА ТОТ, ЧТО ПОЛУЧИШЬ ОТ БОТА
+WELCOME_IMAGE_FILE_ID = "PASTE_YOUR_FILE_ID_HERE"
+
 WELCOME_TEXT = (
     "Добро пожаловать на нашу новогоднюю вечеринку! 🎄✨\n\n"
     "Этот бот — твой личный помощник во всем, что касается нашего праздника.\n\n"
@@ -120,6 +123,18 @@ async def welcome_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# --- ВРЕМЕННЫЙ ХЭНДЛЕР: НАЧАЛО ---
+# (Этот хэндлер нужно будет удалить после получения ID)
+async def get_photo_id_handler(message: Message):
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        logger.info(f"ПОЛУЧЕН FILE_ID: {file_id}")
+        await message.answer(f"Photo `file_id`:\n`{file_id}`", parse_mode="MarkdownV2")
+
+
+# --- ВРЕМЕННЫЙ ХЭНДЛЕР: КОНЕЦ ---
+
+
 async def start_handler(message: Message, state: FSMContext) -> None:
     await load_schema(flag=1)
     await state.clear()
@@ -137,11 +152,16 @@ async def start_handler(message: Message, state: FSMContext) -> None:
             logger.error(f"Ошибка отправки Kafka-сообщений при /start для {user.id}: {e}")
 
     kb = await welcome_keyboard()
-    await message.answer_photo(
-        photo=URLInputFile(WELCOME_IMAGE_URL),
-        caption=WELCOME_TEXT,
-        reply_markup=kb
-    )
+
+    try:
+        await message.answer_photo(
+            photo=WELCOME_IMAGE_FILE_ID,
+            caption=WELCOME_TEXT,
+            reply_markup=kb
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить фото по FILE_ID ({WELCOME_IMAGE_FILE_ID}): {e}. Попробуем отправить текст.")
+        await message.answer(WELCOME_TEXT, reply_markup=kb)
 
 
 async def show_main_menu_callback(query: CallbackQuery, state: FSMContext):
