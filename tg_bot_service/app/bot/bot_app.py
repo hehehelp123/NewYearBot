@@ -113,26 +113,20 @@ def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
 def build_menu_keyboard(item_names: List[str], add_start: bool = False, add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
     rows = []
     row = []
-    # Сначала добавляем все динамические и статичные кнопки меню
-    all_items = list(item_names) # Создаем копию, чтобы не менять исходный список
+    all_items = list(item_names)
+
+    if add_start:
+        all_items.append(START_BUTTON)
+    if add_back_to_welcome:
+        all_items.append(BACK_TO_WELCOME_BUTTON)
 
     for i, name in enumerate(all_items):
         row.append(KeyboardButton(text=name))
-        if len(row) == 2: # Как только в ряду 2 кнопки, добавляем ряд
+        if len(row) == 2:
             rows.append(row)
             row = []
-    if row: # Добавляем последний ряд, если он неполный
+    if row:
         rows.append(row)
-
-    # Отдельно добавляем нижние кнопки (Старт и Назад), если они нужны
-    bottom_buttons_row = []
-    if add_start:
-        bottom_buttons_row.append(KeyboardButton(text=START_BUTTON))
-    if add_back_to_welcome:
-        bottom_buttons_row.append(KeyboardButton(text=BACK_TO_WELCOME_BUTTON))
-
-    if bottom_buttons_row:
-        rows.append(bottom_buttons_row) # Эти кнопки всегда в отдельном ряду
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
