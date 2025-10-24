@@ -3,23 +3,22 @@ import io
 import math
 import random
 from fastapi import APIRouter, Request, Form, UploadFile, File, HTTPException, status, Body, Query
+from fastapi.responses import StreamingResponse, Response
 from app.kafka.producer import kafka_producer
 from app.services.storage_service import storage_service
 from app.services.menu_service import menu_service
 
 router = APIRouter()
 
-
 @router.get("/menu")
 async def get_menu(request: Request):
     return request.app.state.menu_tree
 
-
 @router.post("/tickets")
 async def create_ticket_proxy(
-        telegram_id: int = Form(...),
-        title: str = Form(...),
-        file: UploadFile = File(...)
+    telegram_id: int = Form(...),
+    title: str = Form(...),
+    file: UploadFile = File(...)
 ):
     file_content = await file.read()
     file_stream = io.BytesIO(file_content)
@@ -48,7 +47,6 @@ async def create_ticket_proxy(
 
     return {"status": "accepted", "detail": "Ticket creation request has been accepted."}
 
-
 @router.post("/commands/{command_path}")
 async def handle_command(request: Request, command_path: str, payload: dict = Body(...)):
     command_map = request.app.state.command_map
@@ -65,12 +63,11 @@ async def handle_command(request: Request, command_path: str, payload: dict = Bo
 async def get_album_years():
     return storage_service.list_folders("photos/")
 
-
 @router.get("/albums/{year}")
 async def get_album_media(
-        year: int,
-        page: int = Query(1, ge=1),
-        page_size: int = Query(1, ge=1, le=5)
+    year: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(1, ge=1, le=5)
 ):
     folder = f"photos/{year}/"
     all_media = storage_service.list_media(folder)
@@ -93,7 +90,6 @@ async def get_album_media(
         "page": page
     }
 
-
 @router.get("/albums/{year}/random")
 async def get_random_album_media(year: int):
     folder = f"photos/{year}/"
@@ -108,3 +104,11 @@ async def get_random_album_media(year: int):
     return {
         "page": random_index + 1
     }
+
+@router.get("/albums/media/{object_name:path}")
+async def download_album_media(object_name: str):
+    file_bytes, content_type = storage_service.download_file_as_bytes(object_name)
+    if file_bytes is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media file not found in storage.")
+
+    return Response(content=file_bytes, media_type=content_type)

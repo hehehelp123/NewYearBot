@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logging.info("Starting aiogram bot registration...")
 
+
     dp.callback_query.register(
         wishlist_navigation_handler,
         StateFilter(WishlistBrowser.browsing)

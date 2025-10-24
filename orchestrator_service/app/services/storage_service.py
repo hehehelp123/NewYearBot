@@ -1,11 +1,11 @@
 import logging
 import datetime
 import random
+import io
 from minio import Minio
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
 
 class StorageService:
     def __init__(self):
@@ -15,7 +15,7 @@ class StorageService:
             secret_key=settings.MINIO_ROOT_PASSWORD,
             secure=False
         )
-        logger.info("MinIO client initialized in Orchestrator.")
+        logger.info(f"MinIO client initialized: {settings.MINIO_URL}")
 
     def upload_file_obj(self, object_name: str, file_data, file_len: int, content_type: str):
         try:
@@ -53,22 +53,23 @@ class StorageService:
             for obj in objects:
                 if not obj.is_dir and (obj.object_name.endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi'))):
                     media_type = "video" if obj.object_name.lower().endswith(('.mp4', '.mov', '.avi')) else "photo"
-
-                    presigned_url = self.client.presigned_get_object(
-                        settings.MINIO_BUCKET,
-                        obj.object_name,
-                        expires=datetime.timedelta(hours=1)
-                    )
-
                     media_list.append({
                         "object_name": obj.object_name,
                         "type": media_type,
-                        "url": presigned_url
                     })
             return media_list
         except Exception as e:
             logger.error(f"Failed to list media in folder {folder}: {e}", exc_info=True)
             return []
 
+    def download_file_as_bytes(self, object_name: str) -> tuple[bytes | None, str | None]:
+        try:
+            response = self.client.get_object(settings.MINIO_BUCKET, object_name)
+            file_bytes = response.read()
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            return file_bytes, content_type
+        except Exception as e:
+            logger.error(f"Failed to download file {object_name} as bytes: {e}", exc_info=True)
+            return None, None
 
 storage_service = StorageService()
