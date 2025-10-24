@@ -59,7 +59,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "wishlist.view.viewer_success",
         "wishlist.view.owner_failed",
         "wishlist.view.viewer_failed",
-        "album.send.media",
     ]
 
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)

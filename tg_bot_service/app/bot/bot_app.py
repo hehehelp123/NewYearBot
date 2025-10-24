@@ -70,9 +70,9 @@ def escape_markdown(text: str) -> str:
 def get_current_new_year() -> Optional[int]:
     now = datetime.now()
     if now.month == 1 and now.day < 15:
-        return now.year - 1
-    if now.month == 12:
         return now.year
+    if now.month == 12:
+        return now.year + 1
     return None
 
 
@@ -606,7 +606,11 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         items = album_data.get("items", [])
 
         if not items:
-            return "В этом альбоме нет медиа.", None
+            await state.update_data(page=0)
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text="Меню годов", callback_data="album_menu"),
+                        InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
+            return "В этом альбоме нет медиа.", builder.as_markup(), None, 0
 
         item = items[0]
         media_url = item.get("url")
@@ -634,7 +638,10 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
 
     except Exception as e:
         logger.error(f"Не удалось построить страницу альбома: {e}")
-        return "Ошибка загрузки альбома.", None, None, page
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="Меню годов", callback_data="album_menu"),
+                    InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
+        return "Ошибка загрузки альбома.", builder.as_markup(), None, page
 
 
 async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
@@ -687,11 +694,18 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
         except TelegramBadRequest as e:
             if "media is identical" in str(e):
                 if query.message.caption != caption:
-                    await query.message.edit_caption(caption=caption, reply_markup=markup)
+                    try:
+                        await query.message.edit_caption(caption=caption, reply_markup=markup)
+                    except Exception as e_caption:
+                        logger.warning(f"Не удалось обновить caption: {e_caption}")
             else:
                 logger.error(f"Ошибка обновления медиа в альбоме: {e}")
     else:
-        await query.message.edit_text(caption, reply_markup=markup)
+        try:
+            await query.message.edit_text(caption, reply_markup=markup)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                logger.error(f"Ошибка обновления текста в альбоме: {e}")
 
 
 async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> (str, InlineKeyboardMarkup):
