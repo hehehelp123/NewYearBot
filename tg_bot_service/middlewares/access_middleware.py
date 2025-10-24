@@ -2,8 +2,7 @@ import logging
 from typing import Callable, Dict, Any, Awaitable, Set
 from aiogram import BaseMiddleware
 from aiogram.types import Update, User, Message
-from aiogram.dispatcher.flags import get_flag
-from aiogram.dispatcher.handler import CancelHandler, current_handler
+from aiogram.dispatcher.handler import CancelHandler
 
 from app.core.config import settings
 
@@ -23,7 +22,7 @@ def update_allowed_users(user_id: int, allow: bool):
             allowed_user_ids.remove(user_id)
             logger.info(f"User {user_id} removed from allowed list.")
         elif user_id in settings.ADMIN_TELEGRAM_IDS:
-             logger.warning(f"Attempted to remove admin {user_id} from allowed list. Action denied.")
+             logger.warning(f"Denied attempt to remove admin {user_id}.")
 
 class AccessMiddleware(BaseMiddleware):
     async def __call__(
@@ -32,18 +31,15 @@ class AccessMiddleware(BaseMiddleware):
         event: Update,
         data: Dict[str, Any]
     ) -> Any:
-
         user: User | None = data.get("event_from_user")
-
-        if not user:
-            return await handler(event, data)
+        if not user: return await handler(event, data)
 
         if isinstance(event, Message) and event.text == "/start":
             logger.debug(f"Allowing /start for user {user.id}.")
             return await handler(event, data)
 
         if user.id not in allowed_user_ids:
-            logger.warning(f"Access denied for user {user.id} (@{user.username}). Not in allowed list: {allowed_user_ids}")
+            logger.warning(f"Access denied for user {user.id} (@{user.username}). Allowed: {allowed_user_ids}")
             raise CancelHandler()
 
         logger.debug(f"Access granted for user {user.id}.")

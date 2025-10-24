@@ -13,68 +13,43 @@ from app.kafka.consumer import KafkaBotConsumer
 from app.kafka.producer import kafka_producer
 from app.middlewares.access_middleware import AccessMiddleware
 from app.bot.bot_app import (
-    START_BUTTON,
-    BACK_TO_WELCOME_BUTTON,
-    UPLOAD_MEDIA_BUTTON,
-    VIEW_ALBUMS_BUTTON,
-    STOP_UPLOAD_BUTTON,
-    ADMIN_ADD_USER_BUTTON,
-    ActionForm,
-    WishlistBrowser,
-    MediaUpload,
-    AlbumBrowser,
-    callback_query_handler,
-    menu_handler,
-    process_action_field,
-    start_button_handler,
-    start_handler,
-    wishlist_navigation_handler,
-    show_main_menu_callback,
-    show_info_callback,
-    back_to_welcome_handler,
-    start_media_upload_handler,
-    stop_media_upload_handler,
-    process_media_year_handler,
-    media_upload_handler,
-    start_album_view_handler,
-    album_navigation_handler
+    START_BUTTON, BACK_TO_WELCOME_BUTTON, UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON,
+    STOP_UPLOAD_BUTTON, ADMIN_ADD_USER_BUTTON,
+    ActionForm, WishlistBrowser, MediaUpload, AlbumBrowser, UserRemoval,
+    callback_query_handler, menu_handler, process_action_field, start_button_handler,
+    start_handler, wishlist_navigation_handler, show_main_menu_callback, show_info_callback,
+    back_to_welcome_handler, start_media_upload_handler, stop_media_upload_handler,
+    process_media_year_handler, media_upload_handler, start_album_view_handler,
+    album_navigation_handler,
+    handle_remove_user_confirm, handle_remove_user_delete, handle_remove_user_cancel
 )
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Application lifespan start")
-    await http_client.start()
-
-    bot = Bot(token=settings.BOT_TOKEN)
-    app.state.bot = bot
+    logging.basicConfig(level=logging.INFO); logging.info("Lifespan start")
+    await http_client.start(); bot = Bot(token=settings.BOT_TOKEN); app.state.bot = bot
     dp = Dispatcher()
 
     dp.update.outer_middleware(AccessMiddleware())
 
     await kafka_producer.start()
-
     topics_to_consume = [
-        "notification.send",
-        "notification.send.document",
-        "notification.send.tickets",
-        "wishlist.view.owner_success",
-        "wishlist.view.viewer_success",
-        "wishlist.view.owner_failed",
-        "wishlist.view.viewer_failed",
-        "user.user.allowed",
-        # "user.user.disallowed",   # На будущее
+        "notification.send", "notification.send.document", "notification.send.tickets",
+        "wishlist.view.owner_success", "wishlist.view.viewer_success",
+        "wishlist.view.owner_failed", "wishlist.view.viewer_failed",
+        "user.user.allowed", "user.user.disallowed", "user.user.list_response",
     ]
-
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)
     await kafka_consumer.start()
+    logging.info("Starting handler registration...")
 
-    logging.info("Starting aiogram bot registration...")
     dp.message.register(start_button_handler, F.text == START_BUTTON, StateFilter("*"))
 
     dp.callback_query.register(wishlist_navigation_handler, StateFilter(WishlistBrowser.browsing))
     dp.callback_query.register(album_navigation_handler, StateFilter(AlbumBrowser))
+    dp.callback_query.register(handle_remove_user_confirm, StateFilter(UserRemoval.choosing_user), F.data.startswith("remove_user_confirm:"))
+    dp.callback_query.register(handle_remove_user_delete, StateFilter(UserRemoval.confirming_delete), F.data.startswith("remove_user_delete:"))
+    dp.callback_query.register(handle_remove_user_cancel, StateFilter(UserRemoval), F.data == "remove_user_cancel")
 
     dp.message.register(process_action_field, StateFilter(ActionForm.waiting_for_field), F.text | F.document)
     dp.message.register(stop_media_upload_handler, StateFilter(MediaUpload.uploading), F.text == STOP_UPLOAD_BUTTON)
@@ -93,21 +68,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(menu_handler, F.text)
 
     logging.info("Handlers registered. Starting polling...")
-
     polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
     logging.info("Aiogram bot polling started")
-
-    try:
-        yield
+    try: yield
     finally:
-        await http_client.stop()
-        await kafka_producer.stop()
-        await kafka_consumer.stop()
-        logging.info("Shutting down aiogram bot...")
-        polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            logging.info("Polling task cancelled")
-        await bot.session.close()
-        logging.info("Aiogram bot shutdown complete")
+        await http_client.stop(); await kafka_producer.stop(); await kafka_consumer.stop()
+        logging.info("Shutting down polling..."); polling_task.cancel()
+        try: await polling_task
+        except asyncio.CancelledError: logging.info("Polling cancelled")
+        await bot.session.close(); logging.info("Shutdown complete")
