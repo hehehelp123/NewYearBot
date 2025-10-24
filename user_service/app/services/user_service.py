@@ -2,13 +2,13 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import select, exists, delete
 from app.models.user_models import User
-from app.schemas.user_schemas import UserCreateRequest
+from app.schemas.user_schemas import UserCreate
 from typing import List
 
 logger = logging.getLogger(__name__)
 
 class UserService:
-    async def create_or_update_user(self, db: Session, user_data: UserCreateRequest) -> User:
+    async def create_or_update_user(self, db: Session, user_data: UserCreate) -> User:
         stmt = select(User).where(User.telegram_id == user_data.telegram_id)
         db_user = db.scalars(stmt).first()
 
@@ -36,7 +36,7 @@ class UserService:
             return db_user
         else:
             logger.info(f"User {target_user_id} not found. Creating.")
-            new_user = User(telegram_id=target_user_id, username=None) # Username unknown initially
+            new_user = User(telegram_id=target_user_id, username=None)
             db.add(new_user)
             db.commit()
             db.refresh(new_user)
