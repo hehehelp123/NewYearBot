@@ -178,20 +178,34 @@ services:
     networks:
       - backend
 
-  selenium_firefox:
+  selenium_firefox_music:
     image: selenium/standalone-firefox:latest
-    container_name: selenium_firefox
+    container_name: selenium_firefox_music
     shm_size: 2g
-    environment:
-      SE_NODE_MAX_SESSIONS: 2
-      SE_NODE_OVERRIDE_MAX_SESSIONS: true
     ports:
       - "4444:4444"
       - "7900:7900"
     volumes:
       - ./selenium_downloads:/app/downloads
-      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile.default
-      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile1.default
+      - ./firefox_profile_music:/home/seluser/.mozilla/firefox/profile.default
+    networks:
+      - backend
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4444/wd/hub/status" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  selenium_firefox_wishlist:
+    image: selenium/standalone-firefox:latest
+    container_name: selenium_firefox_wishlist
+    shm_size: 2g
+    ports:
+      - "4445:4444"
+      - "7901:7900"
+    volumes:
+      - ./selenium_downloads:/app/downloads
+      - ./firefox_profile_wishlist:/home/seluser/.mozilla/firefox/profile.default
     networks:
       - backend
     healthcheck:
@@ -279,11 +293,12 @@ services:
     volumes:
       - ./selenium_downloads:/app/downloads
       - ./wishlist_service/alembic/versions:/app/alembic/versions
-      - ./firefox_profile_data:/home/seluser/.mozilla/firefox/profile1.default
     networks:
       - backend
     depends_on:
       wishlist_db:
+        condition: service_healthy
+      selenium_firefox_wishlist:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/docs"]
@@ -352,7 +367,7 @@ services:
     depends_on:
       kafka-setup:
         condition: service_completed_successfully
-      selenium_firefox:
+      selenium_firefox_music:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/"]
@@ -366,7 +381,6 @@ volumes:
   wishlist_db_data:
   ticket_db_data:
   notification_db_data:
-  firefox_profile_data:
   minio_data:
 
 networks:
