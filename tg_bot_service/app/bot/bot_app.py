@@ -50,7 +50,7 @@ WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIb
 WELCOME_TEXT = (
     "Доброго утра тебя, товарищ, и с наступающим (Новый год наступает тогда, когда ему хочется, а не по календарю) Новым годом! 🎄✨\n\n"
     "Этот бот создан упростить тебе жизнь, если мы с Максом не совсем долбоящеры, или сделать ее чуточку смешнее в противном случае.\n\n"
-    "Кликай все, что кликается, по идее работает все, а если не работает то анлак"
+    "Кликай все, что кликается, по идее работает все, а если не работает то анлак. "
     "Короче, бля, удачи 😉\n\n"
     "С наступающим!"
 )
@@ -109,7 +109,7 @@ def find_item_by_name(target_name: str, node: Dict) -> Optional[Dict]:
     return None
 
 
-def build_menu_keyboard(item_names: List[str], add_start: bool = False, add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
+def build_menu_keyboard(item_names: List[str], add_start: bool = True, add_back_to_welcome: bool = False) -> ReplyKeyboardMarkup:
     rows = []
     row = []
     all_items = list(item_names)
@@ -131,17 +131,17 @@ def build_menu_keyboard(item_names: List[str], add_start: bool = False, add_back
 
 
 async def start_button_handler(message: Message, state: FSMContext) -> None:
-    logger.debug(f"Нажата кнопка 'Старт' пользователем {message.from_user.id}")
-    if message.text == START_BUTTON:
-        await state.clear()
-        item_names = await get_root_items()
-        item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+    logger.debug(f"Нажата кнопка 'Куда я жмав' пользователем {message.from_user.id}")
+    await state.clear() # Сбрасываем любое состояние FSM
+    item_names = await get_root_items()
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
 
-        kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
+    # Основное меню: Не добавляем кнопку "Старт" (add_start=False), но добавляем "Назад к приветствию"
+    kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
 
-        await state.update_data(current_node=await load_schema())
-        await message.answer("Ну кликни шо-нить:", reply_markup=kb)
-        return
+    await state.update_data(current_node=await load_schema())
+    await message.answer("Ну кликни шо-нить:", reply_markup=kb)
+    return
 
 async def welcome_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -303,7 +303,8 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
         field_info = payload_schema[field_name]
         await message.answer(
             f"Введите '{field_info['description']}' ({field_info['type']}):",
-            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=True)
+            # Клавиатура для ввода данных теперь всегда включает кнопку "Куда я жмав"
+            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=False)
         )
 
 
@@ -422,6 +423,7 @@ async def reset_to_main_menu(message: Message, state: FSMContext, is_action_fini
     item_names = await get_root_items()
     item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
 
+    # Снова используем build_menu_keyboard, которая теперь всегда добавляет нужные кнопки
     kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
 
     await state.update_data(current_node=await load_schema())
@@ -458,7 +460,7 @@ async def start_media_upload_handler(message: Message, state: FSMContext):
         await message.answer(
             "Сейчас не 'новогодний сезон' если верить календарю вместо сердца.\n"
             "**Пожалуйста, введите год**, для которого вы хотите загрузить фото/видео (например, 2024).**",
-            reply_markup=build_menu_keyboard([], add_back_to_welcome=True),
+            reply_markup=build_menu_keyboard([], add_start=True, add_back_to_welcome=False), # Тут "Назад" не нужна
             parse_mode="Markdown"
         )
 
@@ -705,6 +707,7 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
                 logger.error(f"Ошибка обновления медиа в альбоме: {e}")
                 try:
                     await query.message.answer("Не удалось обновить предыдущее сообщение, показываю текущий файл.")
+                    # Важно использовать .file атрибут BufferedInputFile
                     if isinstance(media_input, InputMediaPhoto):
                         await query.message.answer_photo(media_input.media.file, caption=caption, reply_markup=markup)
                     else:

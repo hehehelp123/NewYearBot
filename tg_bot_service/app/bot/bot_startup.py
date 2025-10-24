@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await kafka_consumer.start()
 
     logging.info("Starting aiogram bot registration...")
-
+    dp.message.register(start_button_handler, F.text == START_BUTTON, StateFilter("*"))
 
     dp.callback_query.register(
         wishlist_navigation_handler,
@@ -98,7 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     dp.message.register(start_handler, F.text == "/start")
-    dp.message.register(start_button_handler, F.text == START_BUTTON)
     dp.message.register(
         back_to_welcome_handler,
         F.text == BACK_TO_WELCOME_BUTTON
