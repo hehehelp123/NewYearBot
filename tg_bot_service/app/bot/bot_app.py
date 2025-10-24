@@ -39,20 +39,19 @@ class AlbumBrowser(StatesGroup):
     choosing_year = State()
     browsing = State()
 
-START_BUTTON = "🔄 Старт"
-BACK_TO_WELCOME_BUTTON = "⬅️ Назад к приветствию"
-UPLOAD_MEDIA_BUTTON = "📸 Загрузить фото/видео"
-VIEW_ALBUMS_BUTTON = "🖼️ Смотреть альбомы"
-STOP_UPLOAD_BUTTON = "✅ Закончить загрузку"
+START_BUTTON = "🔄 Куда я жмав"
+BACK_TO_WELCOME_BUTTON = "⬅️ Ещё разок приветствие"
+UPLOAD_MEDIA_BUTTON = "📸 Загрузка нюдсов"
+VIEW_ALBUMS_BUTTON = "🖼️ Смотреть кто что загрузил"
+STOP_UPLOAD_BUTTON = "✅ Все чё мог то загрузил"
 
 WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIbhS-7FY2lmbDJ-AQADAgADeAADNgQ"
 
 WELCOME_TEXT = (
-    "Добро пожаловать на нашу новогоднюю вечеринку! 🎄✨\n\n"
-    "Этот бот — твой личный помощник во всем, что касается нашего праздника.\n\n"
-    "Используй кнопки ниже, чтобы узнать пароль от WiFi, "
-    "связаться с организаторами или перейти в главное меню, чтобы... "
-    "ну, ты сам все увидишь! 😉\n\n"
+    "Доброго утра тебя, товарищ, и с наступающим (Новый год наступает тогда, когда ему хочется, а не по календарю) Новым годом! 🎄✨\n\n"
+    "Этот бот создан упростить тебе жизнь, если мы с Максом не совсем долбоящеры, или сделать ее чуточку смешнее в противном случае.\n\n"
+    "Кликай все, что кликается, по идее работает все, а если не работает то анлак"
+    "Короче, бля, удачи 😉\n\n"
     "С наступающим!"
 )
 
@@ -141,14 +140,14 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
         kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
 
         await state.update_data(current_node=await load_schema())
-        await message.answer("Выберите пункт меню:", reply_markup=kb)
+        await message.answer("Ну кликни шо-нить:", reply_markup=kb)
         return
 
 async def welcome_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔑 Пароль от WiFi", callback_data="info:wifi")
-    builder.button(text="🆘 Связь с админами", callback_data="info:admins")
-    builder.button(text="🚀 Поехали! (Главное меню)", callback_data="info:go_to_main_menu")
+    builder.button(text="🔑 Хочу WiFi", callback_data="info:wifi")
+    builder.button(text="🆘 Кто тут у нас?", callback_data="info:admins")
+    builder.button(text="🚀 Ну давай не томи", callback_data="info:go_to_main_menu")
     builder.adjust(2, 1)
     return builder.as_markup()
 
@@ -200,7 +199,7 @@ async def show_main_menu_callback(query: CallbackQuery, state: FSMContext):
     if item_names:
         await state.update_data(current_node=await load_schema())
         kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
-        await query.message.answer("Добро пожаловать! Выберите пункт меню:", reply_markup=kb)
+        await query.message.answer("Доброе утро, мопсы! Выберите пункт меню (или просто посмотрите какие кайфовые тут смайлики, долго выбирал):", reply_markup=kb)
     else:
         await query.message.answer("Схема меню пуста или не найдена.")
 
@@ -227,11 +226,11 @@ async def show_info_callback(query: CallbackQuery):
 
         for name, user_id in admin_map.items():
             builder.button(text=name, url=f"tg://user?id={user_id}")
-        builder.button(text="⬅️ Назад", callback_data="info:back_to_welcome")
+        builder.button(text="⬅️ Куда я жмав...", callback_data="info:back_to_welcome")
         builder.adjust(1)
 
         await query.message.edit_caption(
-            caption="Вот наши организаторы. По любым вопросам — сразу к ним!",
+            caption="Жабы со стажем, все вопросы к жабам (за эксзистенциальные будете наказаны).",
             reply_markup=builder.as_markup()
         )
         await query.answer()
@@ -254,7 +253,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
     current_node = data.get("current_node", await load_schema())
     selected = find_item_by_name(message.text, current_node)
     if selected is None:
-        await message.answer(f"Пункт '{message.text}' не найден. Попробуйте снова.")
+        await message.answer(f"Пункт '{message.text}' ты здесь не найдешь. Давай че-нить другое.")
         return
 
     if selected.get("type") == "menu":
@@ -263,9 +262,9 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         if sub_names:
             await state.update_data(current_node=selected)
             kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=True)
-            await message.answer("Выберите пункт меню:", reply_markup=kb)
+            await message.answer("Кликай!", reply_markup=kb)
         else:
-            await message.answer("В этом меню нет пунктов.")
+            await message.answer("Ну и как ты сюда попал?..")
         return
 
     if selected.get("type") == "action":
@@ -283,7 +282,7 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
         if message.from_user:
             collected_data["telegram_id"] = message.from_user.id
 
-        await message.answer("Выполняю запрос...")
+        await message.answer("Ля, погодь, я думаю...")
 
         try:
             kafka_topic = action.get("kafka_topic")
@@ -322,10 +321,10 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
 
     if field_type == "file":
         if not message.document:
-            await message.answer("Пожалуйста, прикрепите файл.")
+            await message.answer("Кинь файлик")
             return
         doc = message.document
-        await message.answer(f"Загружаю файл '{doc.file_name}' на сервер...")
+        await message.answer(f"Кроду '{doc.file_name}' на сервер...")
         file_info = await bot.get_file(doc.file_id)
         file_bytes = await bot.download_file(file_info.file_path)
 
@@ -337,16 +336,16 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
                 content_type=doc.mime_type or "application/pdf"
             )
             collected_data[current_field_name] = object_name
-            await message.answer("Файл успешно загружен.")
+            await message.answer("Файлик успешно национализирован.")
             logger.info(f"Файл {object_name} загружен в MinIO")
         except Exception as e:
             logger.error(f"Ошибка загрузки файла в MinIO: {e}", exc_info=True)
-            await message.answer("Произошла ошибка при загрузке файла. Попробуйте еще раз.")
+            await message.answer("Плохой файл, у меня от него живот болит, чет не то.")
             return
 
     else:
         if not message.text:
-            await message.answer("Пожалуйста, введите текст.")
+            await message.answer("Букавы пиши.")
             return
         collected_data[current_field_name] = message.text
 
@@ -366,7 +365,7 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
 
             logger.info(f"Action {kafka_topic} (с полями) готов к отправке в Kafka")
             await kafka_producer.send(kafka_topic, collected_data)
-            await message.answer("Ваш запрос принят в обработку!")
+            await message.answer("Я подумаю над этим на досуге.")
         except Exception as e:
             logger.error(f"Ошибка отправки в Kafka: {e}", exc_info=True)
             await message.answer(f"Ошибка: {e}")
@@ -386,7 +385,7 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
     user_id = query.from_user.id
 
     if action == "download_ticket":
-        await query.answer("Запрос на скачивание отправлен...")
+        await query.answer("Ща поищу...")
         command_path = "ticket_download_request"
         action_schema = {"method": "POST", "url": f"/api/v1/commands/{command_path}"}
         payload = {"telegram_id": user_id, "ticket_id": ticket_id}
@@ -395,17 +394,17 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
 
     elif action == "delete_ticket":
         builder = InlineKeyboardBuilder()
-        builder.button(text="Да, удалить", callback_data=f"confirm_delete:{ticket_id}")
-        builder.button(text="Нет, отмена", callback_data=f"cancel_delete:{ticket_id}")
+        builder.button(text="Да, нахер билеты", callback_data=f"confirm_delete:{ticket_id}")
+        builder.button(text="Не, погодь", callback_data=f"cancel_delete:{ticket_id}")
         await query.message.edit_text(
-            f"Вы уверены, что хотите удалить билет **{query.message.text.splitlines()[0]}**?",
+            f"Ты че, решил не приезжать с **{query.message.text.splitlines()[0]}**?",
             reply_markup=builder.as_markup(),
             parse_mode="MarkdownV2"
         )
         await query.answer()
 
     elif action == "confirm_delete":
-        await query.answer("Запрос на удаление отправлен...")
+        await query.answer("Очистка!..")
         command_path = "ticket_delete_request"
         action_schema = {"method": "POST", "url": f"/api/v1/commands/{command_path}"}
         payload = {"telegram_id": user_id, "ticket_id": ticket_id}
@@ -415,7 +414,7 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
 
     elif action == "cancel_delete":
         await query.message.edit_text(query.message.text, entities=query.message.entities, reply_markup=None)
-        await query.answer("Удаление отменено.")
+        await query.answer("Вернул как было!")
 
 
 async def reset_to_main_menu(message: Message, state: FSMContext, is_action_finish: bool = False):
@@ -427,9 +426,9 @@ async def reset_to_main_menu(message: Message, state: FSMContext, is_action_fini
 
     await state.update_data(current_node=await load_schema())
 
-    text = "Выберите пункт меню:"
+    text = "Кликай меню:"
     if is_action_finish:
-        text = "Действие завершено. Выберите следующий пункт меню:"
+        text = "Я всё. Чем ещё займёшь?"
 
     await message.answer(text, reply_markup=kb)
     logger.debug(f"Сброс в главное меню для {message.from_user.id}")
@@ -449,7 +448,7 @@ async def start_media_upload_handler(message: Message, state: FSMContext):
         await state.update_data(year=current_year)
         await message.answer(
             f"Режим загрузки фото/видео для Нового Года **{current_year}** включен.\n"
-            "Отправляйте файлы (по одному или альбомом).\n"
+            "Отправляйте нюдсы (по одному или альбомом) (только если ты не Макс боже умоляю).\n"
             "Когда закончите, нажмите кнопку внизу.",
             reply_markup=kb,
             parse_mode="Markdown"
@@ -457,7 +456,7 @@ async def start_media_upload_handler(message: Message, state: FSMContext):
     else:
         await state.set_state(MediaUpload.waiting_for_year)
         await message.answer(
-            "Сейчас не 'новогодний сезон'.\n"
+            "Сейчас не 'новогодний сезон' если верить календарю вместо сердца.\n"
             "**Пожалуйста, введите год**, для которого вы хотите загрузить фото/видео (например, 2024).**",
             reply_markup=build_menu_keyboard([], add_back_to_welcome=True),
             parse_mode="Markdown"
@@ -465,12 +464,12 @@ async def start_media_upload_handler(message: Message, state: FSMContext):
 
 async def process_media_year_handler(message: Message, state: FSMContext):
     if not message.text or not message.text.isdigit():
-        await message.answer("Пожалуйста, введите год в виде числа (например, 2024).")
+        await message.answer("Пожалуйста, числом блять (например, 2024).")
         return
 
     year = int(message.text)
     if not (2020 < year < 2030):
-        await message.answer("Пожалуйста, введите корректный год (с 2021 по 2029).")
+        await message.answer("Пожалуйста, нормальное число, Макс (с 2021 по 2029).")
         return
 
     logger.info(f"Пользователь {message.from_user.id} выбрал {year} год для загрузки.")
@@ -483,7 +482,7 @@ async def process_media_year_handler(message: Message, state: FSMContext):
     )
     await message.answer(
         f"Режим загрузки фото/видео для **{year}** включен.\n"
-        "Отправляйте файлы. Когда закончите, нажмите кнопку внизу.",
+        "Отправляйте нюдсы. Когда надоест, так и скажите.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -491,13 +490,13 @@ async def process_media_year_handler(message: Message, state: FSMContext):
 async def stop_media_upload_handler(message: Message, state: FSMContext):
     logger.info(f"Пользователь {message.from_user.id} закончил загрузку медиа.")
     await state.clear()
-    await message.answer("Вы вышли из режима загрузки.")
+    await message.answer("Неплохая работа.")
     await reset_to_main_menu(message, state)
 
 
 async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
     if not (message.photo or message.video):
-        await message.answer("Пожалуйста, отправьте фото или видео.")
+        await message.answer("Ну-ка, ну-ка, что тут у нас.")
         return
 
     data = await state.get_data()
@@ -527,7 +526,7 @@ async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
 
 
     logger.debug(f"Получено медиа {file_unique_id} от {message.from_user.id}")
-    await message.answer(f"Загружаю (ID: ...{file_unique_id[-6:]})...")
+    await message.answer(f"Украдываю (ID: ...{file_unique_id[-6:]})...")
 
     try:
         file_info = await bot.get_file(file_id)
@@ -542,11 +541,11 @@ async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
             content_type=content_type
         )
         logger.info(f"Медиа {object_name} успешно загружено в {folder}")
-        await message.answer(f"✅ Файл ...{file_unique_id[-6:]} загружен!")
+        await message.answer(f"✅ Файл ...{file_unique_id[-6:]} национализирован!")
 
     except Exception as e:
         logger.error(f"Ошибка загрузки медиа {file_unique_id} в MinIO: {e}", exc_info=True)
-        await message.answer(f"❌ Произошла ошибка при загрузке ...{file_unique_id[-6:]}.")
+        await message.answer(f"❌ Што ты наделал ...{file_unique_id[-6:]}.")
 
 
 async def start_album_view_handler(message: Message, state: FSMContext):
@@ -559,21 +558,21 @@ async def start_album_view_handler(message: Message, state: FSMContext):
         years = response.json()
 
         if not years:
-            await message.answer("Пока нет ни одного загруженного альбома.")
+            await message.answer("Пока нет ни одного загруженного альбома (базе пиздец):(.")
             return
 
         await state.set_state(AlbumBrowser.choosing_year)
         builder = InlineKeyboardBuilder()
         for year in years:
             builder.button(text=f"Альбом {year}", callback_data=f"album_year:{year}")
-        builder.button(text="❌ Закрыть", callback_data="album_close")
+        builder.button(text="❌ Не, нафиг", callback_data="album_close")
         builder.adjust(2)
 
         await message.answer("Выберите альбом для просмотра:", reply_markup=builder.as_markup())
 
     except Exception as e:
         logger.error(f"Не удалось получить список годов альбомов: {e}")
-        await message.answer("Не удалось загрузить список альбомов. Попробуйте позже.")
+        await message.answer("Не удалось загрузить список альбомов. Попробуйте написать Мише.")
 
 async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
     data = await state.get_data()
@@ -582,7 +581,7 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
     message_id = data.get("message_id")
 
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Меню годов", callback_data="album_menu"), InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
+    builder.row(InlineKeyboardButton(text="Выбирай чо хошь", callback_data="album_menu"), InlineKeyboardButton(text="❌ Не-не-не", callback_data="album_close"))
     error_markup = builder.as_markup()
 
     try:
@@ -600,7 +599,7 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
 
         if not items:
             await state.update_data(page=0)
-            return "В этом альбоме нет медиа.", error_markup, None, 0
+            return "В этом альбоме могла бы быть ваша реклама.", error_markup, None, 0
 
         item = items[0]
         object_name = item.get("object_name")
@@ -618,7 +617,7 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         if current_page > 1:
             nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"album_page:{current_page - 1}"))
 
-        nav_buttons.append(InlineKeyboardButton(text="🎲 Случайно", callback_data="album_random"))
+        nav_buttons.append(InlineKeyboardButton(text="🎲 Поиграем?~", callback_data="album_random"))
 
         if current_page < total_pages:
             nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"album_page:{current_page + 1}"))
@@ -765,17 +764,17 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> (str, I
     if booking_info:
         booker_id = booking_info.get("booked_by_user_id")
         if booker_id == viewer_user_id:
-            text += f"\n*Статус:* 🎁 Вы забронировали этот товар\\!\n"
-            builder.button(text="🎁 Снять бронь", callback_data=f"wishlist_unbook:{item_id}")
+            text += f"\n*Статус:* 🎁 Задание принято, будут кары если не выполните\\!\n"
+            builder.button(text="🎁 Молить об отмене", callback_data=f"wishlist_unbook:{item_id}")
         else:
-            text += f"\n*Статус:* ⛔️ Забронирован пользователем {booker_id}\n"
-            builder.button(text="⛔️ Забронирован", callback_data="wishlist_noop")
+            text += f"\n*Статус:* ⛔️ Захвачено {booker_id}\n"
+            builder.button(text="⛔️ Захвачен", callback_data="wishlist_noop")
     elif is_owner:
-        text += f"\n*Статус:* ✅ Ваш товар\\. Доступен для бронирования\n"
-        builder.button(text="🗑️ Удалить", callback_data=f"wishlist_delete:{item_id}")
+        text += f"\n*Статус:* ✅ Ваш товар\\. Доступен для приватизации\n"
+        builder.button(text="🗑️ Отдать африканским детям", callback_data=f"wishlist_delete:{item_id}")
     else:
-        text += f"\n*Статус:* ✅ Доступен для бронирования\n"
-        builder.button(text="🎁 Забронировать", callback_data=f"wishlist_book:{item_id}")
+        text += f"\n*Статус:* ✅ Доступен для захвата\n"
+        builder.button(text="🎁 Приватизировать", callback_data=f"wishlist_book:{item_id}")
 
     return text, builder.as_markup()
 
@@ -823,7 +822,7 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         text, markup = await build_wishlist_page(state, query.from_user.id)
         await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
 
-        await query.answer("✅ Забронировано!")
+        await query.answer("✅ Теперь живи с этим!")
         return
 
     elif action == "wishlist_unbook":
@@ -841,7 +840,7 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         text, markup = await build_wishlist_page(state, query.from_user.id)
         await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
 
-        await query.answer("✅ Бронь снята!")
+        await query.answer("✅ Мольбы услышаны!")
         return
 
     elif action == "wishlist_delete":
@@ -856,8 +855,8 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
 
         if not new_items:
             await state.update_data(items=[], current_index=0)
-            await query.message.edit_text("✅ Товар удален. Вишлист теперь пуст.", reply_markup=None)
-            await query.answer("Товар удален. Вишлист пуст.", show_alert=True)
+            await query.message.edit_text("✅ Товар удален. Желать больше нечего...", reply_markup=None)
+            await query.answer("Товар удален... Желать больше нечего...", show_alert=True)
             return
 
         new_index = current_index
