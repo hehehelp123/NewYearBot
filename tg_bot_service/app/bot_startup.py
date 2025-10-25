@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.http_client import http_client
 from app.kafka.consumer import KafkaBotConsumer
 from app.kafka.producer import kafka_producer
-from app.middlewares.access_middleware import AccessMiddleware, fetch_allowed_users
+from app.middlewares.access_middleware import AccessMiddleware
 
 from app.bot.constants import (
     START_BUTTON, BACK_TO_WELCOME_BUTTON, UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON,
@@ -49,7 +49,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logging.basicConfig(level=logging.INFO);
     logging.info("Lifespan start")
     await http_client.start();
-    await fetch_allowed_users()
     bot = Bot(token=settings.BOT_TOKEN);
     app.state.bot = bot
     dp = Dispatcher()

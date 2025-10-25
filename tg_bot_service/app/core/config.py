@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str
 
     WIFI_PASSWORD: str = "YOUR_WIFI_PASSWORD"
+    ALLOWED_TELEGRAM_IDS: List[int] = []
     ADMIN_TELEGRAM_IDS: List[int] = []
 
     model_config = SettingsConfigDict(env_file=".env")
