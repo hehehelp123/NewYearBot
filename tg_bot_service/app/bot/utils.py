@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str): return ""
+    # Более агрессивное экранирование для MarkdownV2
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
-    return re.sub(f"({escape_chars})", r"\\\1", text)
+    # Экранируем сначала бэкслеш, потом остальные символы
+    text = text.replace('\\', '\\\\')
+    return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
 
 
 def get_current_new_year() -> Optional[int]:
@@ -62,7 +65,7 @@ async def get_root_items(user_id: int) -> List[str]:
 
     item_names = [
         item.get("name") for item in items
-        if isinstance(item, Dict) and isinstance(item.get("name"), str)
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
            and (not item.get("admin_only") or is_admin)
     ]
 
@@ -70,7 +73,7 @@ async def get_root_items(user_id: int) -> List[str]:
 
 
 async def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optional[Dict]:
-    if not isinstance(node, Dict): return None
+    if not isinstance(node, dict): return None
 
     schema = await load_schema()
     if not schema:
@@ -81,7 +84,7 @@ async def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optio
     is_admin = user_id in settings.ADMIN_TELEGRAM_IDS
 
     for child in children:
-        if isinstance(child, Dict) and child.get("name") == target_name:
+        if isinstance(child, dict) and child.get("name") == target_name:
             if child.get("admin_only", False) and not is_admin:
                 continue
             return child

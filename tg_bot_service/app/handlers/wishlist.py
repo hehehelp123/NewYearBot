@@ -4,10 +4,15 @@ from aiogram import Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+# --- ДОБАВЛЕННЫЙ ИМПОРТ ---
+from aiogram.exceptions import TelegramBadRequest
+# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 from app.kafka.producer import kafka_producer
 from app.bot.states import WishlistAddManual
+# --- ИЗМЕНЕНИЯ: импортируем escape_markdown из utils ---
 from app.bot.utils import escape_markdown, reset_to_main_menu
+# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 from app.bot.keyboards import build_menu_keyboard
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,7 @@ async def process_manual_wishlist_name(message: Message, state: FSMContext):
     await state.set_state(WishlistAddManual.waiting_for_cost)
     await message.answer("Теперь введи примерную цену (или 'пропустить'):")
 
+
 async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     data = await state.get_data()
     if "manual_add_data" not in data: data["manual_add_data"] = {}
@@ -57,6 +63,7 @@ async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     await state.set_data(data)
     await state.set_state(WishlistAddManual.waiting_for_url)
     await message.answer("Добавь ссылку (или 'пропустить'):")
+
 
 async def process_manual_wishlist_url(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -69,15 +76,16 @@ async def process_manual_wishlist_url(message: Message, state: FSMContext):
 
     item = data.get("manual_add_data", {})
     text = f"Проверь:\n"
-    text += f"Название: {item.get('name', 'N/A')}\n"
-    text += f"Цена: {item.get('cost', 'N/A')}\n"
-    text += f"URL: {item.get('item_url', 'N/A')}\n"
+    text += f"Название: {escape_markdown(item.get('name', 'N/A'))}\n"  # Экранируем для простого текста
+    text += f"Цена: {escape_markdown(item.get('cost', 'N/A'))}\n"
+    text += f"URL: {escape_markdown(item.get('item_url', 'N/A'))}\n"
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_manual_confirm:single")
     builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_manual_confirm:infinite")
     builder.button(text="❌ Отмена", callback_data="wishlist_manual_confirm:cancel")
-    await message.answer(text, reply_markup=builder.as_markup())
+    # Используем parse_mode=None для простого текста подтверждения
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode=None)
 
 
 async def process_manual_wishlist_confirm(query: CallbackQuery, state: FSMContext):
@@ -131,18 +139,13 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     item_price = escape_markdown(item_price_raw)
     item_delivery = escape_markdown(item_delivery_raw)
     item_name = escape_markdown(item_name_raw)
-
-    # --- ИЗМЕНЕНИЯ: Отображаем URL как экранированный текст ---
     item_url_escaped = escape_markdown(str(item_url_raw) if item_url_raw else "N/A")
-    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     is_infinitely_bookable = item.get("is_infinitely_bookable", False)
     bookings = item.get("bookings", [])
 
     text = f"*Товар {current_index + 1}/{len(items)}*\n\n*Название:* {item_name}\n"
-    # --- ИЗМЕНЕНИЯ: Используем экранированный URL ---
     text += f"*URL:* {item_url_escaped}\n"
-    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     is_owner = (owner_user_id == viewer_user_id)
     text += f"*Цена:* {item_price}\n*Доставка:* {item_delivery}\n"
@@ -218,14 +221,26 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
             items[current_index]['bookings'].append(new_booking_info)
             await state.update_data(items=items)
 
-        text, markup = await build_wishlist_page(state, query.from_user.id)
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            text, markup = await build_wishlist_page(state, query.from_user.id)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            logger.error(f"Failed to edit message on book (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+            try:
+                plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
+                plain_text = plain_text.replace('*', '').replace('_', '')
+                await query.message.edit_text(plain_text, reply_markup=markup, disable_web_page_preview=True)
+            except Exception as plain_e:
+                logger.error(f"Failed to edit message on book even as plain text: {plain_e}")
+                await query.message.answer(f"Ошибка отображения: {e}")
         except Exception as e:
-             logger.error(f"Failed to edit message on book: {e}. Text: {text}")
-             await query.message.answer(f"Ошибка отображения: {e}")
+            logger.error(f"Unexpected error editing message on book: {e}", exc_info=True)
+            await query.message.answer(f"Неожиданная ошибка отображения: {e}")
+
         await query.answer("✅ Теперь живи с этим!")
         return
+
     elif action == "wishlist_unbook":
         item_id = int(value[0])
         await kafka_producer.send("wishlist.item.unbook", {"item_id": item_id, "unbooker_user_id": query.from_user.id})
@@ -236,14 +251,27 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
                 if b.get('booked_by_user_id') != query.from_user.id
             ]
             await state.update_data(items=items)
-        text, markup = await build_wishlist_page(state, query.from_user.id)
+
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            text, markup = await build_wishlist_page(state, query.from_user.id)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            logger.error(f"Failed to edit message on unbook (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+            try:
+                plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
+                plain_text = plain_text.replace('*', '').replace('_', '')
+                await query.message.edit_text(plain_text, reply_markup=markup, disable_web_page_preview=True)
+            except Exception as plain_e:
+                logger.error(f"Failed to edit message on unbook even as plain text: {plain_e}")
+                await query.message.answer(f"Ошибка отображения: {e}")
         except Exception as e:
-            logger.error(f"Failed to edit message on unbook: {e}. Text: {text}")
-            await query.message.answer(f"Ошибка отображения: {e}")
+            logger.error(f"Unexpected error editing message on unbook: {e}", exc_info=True)
+            await query.message.answer(f"Неожиданная ошибка отображения: {e}")
+
         await query.answer("✅ Мольбы услышаны!")
         return
+
     elif action == "wishlist_delete":
         item_id = int(value[0])
         await kafka_producer.send("wishlist.item.delete", {"item_id": item_id, "deleter_user_id": query.from_user.id})
@@ -258,33 +286,55 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         if new_index >= len(new_items):
             new_index = max(0, len(new_items) - 1)
         await state.update_data(items=new_items, current_index=new_index)
-        text, markup = await build_wishlist_page(state, query.from_user.id)
+
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            text, markup = await build_wishlist_page(state, query.from_user.id)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            logger.error(f"Failed to edit message on delete (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+            try:
+                plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
+                plain_text = plain_text.replace('*', '').replace('_', '')
+                await query.message.edit_text(plain_text, reply_markup=markup, disable_web_page_preview=True)
+            except Exception as plain_e:
+                logger.error(f"Failed to edit message on delete even as plain text: {plain_e}")
+                await query.message.answer(f"Ошибка отображения: {e}")
         except Exception as e:
-            logger.error(f"Failed to edit message on delete: {e}. Text: {text}")
-            await query.message.answer(f"Ошибка отображения: {e}")
+            logger.error(f"Unexpected error editing message on delete: {e}", exc_info=True)
+            await query.message.answer(f"Неожиданная ошибка отображения: {e}")
+
         await query.answer("✅ Товар удален!")
         return
+
     elif action == "wishlist_noop":
         await query.answer()
         return
 
+    # Навигация (prev/next)
     try:
         text, markup = await build_wishlist_page(state, query.from_user.id)
         if text and markup:
-            # --- ИЗМЕНЕНИЯ: Отправляем новое сообщение вместо редактирования ---
-            await query.message.answer(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
-            await query.message.delete() # Удаляем старое
-            # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
         elif text:
-             # --- ИЗМЕНЕНИЯ: Отправляем новое сообщение вместо редактирования ---
-            await query.message.answer(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
-            await query.message.delete() # Удаляем старое
-             # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+            await query.message.edit_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+    except TelegramBadRequest as e:
+        logger.error(f"Failed to edit message on navigation (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+        try:
+            plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
+            plain_text = plain_text.replace('*', '').replace('_', '')
+            if markup:
+                await query.message.edit_text(plain_text, reply_markup=markup, disable_web_page_preview=True)
+            else:
+                await query.message.edit_text(plain_text, disable_web_page_preview=True)
+        except Exception as plain_e:
+            logger.error(f"Failed to edit message on navigation even as plain text: {plain_e}")
+            await query.message.answer(f"Ошибка отображения: {e}")
     except Exception as e:
-        logger.error(f"Failed to send message on navigation: {e}. Text: {text}")
-        await query.message.answer(f"Ошибка отображения: {e}")
+        logger.error(f"Unexpected error editing message on navigation: {e}", exc_info=True)
+        await query.message.answer(f"Неожиданная ошибка отображения: {e}")
+
 
 async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
     await query.answer()

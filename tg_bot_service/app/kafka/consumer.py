@@ -10,6 +10,9 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import BufferedInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
+# --- ДОБАВЛЕННЫЙ ИМПОРТ ---
+from aiogram.exceptions import TelegramBadRequest
+# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 from app.middlewares.access_middleware import update_allowed_users
 from app.core.config import settings
@@ -24,15 +27,17 @@ from app.bot.states import (
     WishlistAddManual
 )
 
-
 logger = logging.getLogger(__name__)
 
 
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str):
         return ""
+    # Более агрессивное экранирование для MarkdownV2
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
-    return re.sub(f"({escape_chars})", r"\\\1", text)
+    # Экранируем сначала бэкслеш, потом остальные символы
+    text = text.replace('\\', '\\\\')
+    return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
 
 
 class KafkaBotConsumer:
@@ -85,9 +90,12 @@ class KafkaBotConsumer:
                         await self._handle_wishlist_view(msg.value)
                     elif msg.topic == "wishlist.view.owner_success":
                         await self._handle_wishlist_view(msg.value)
-                    elif msg.topic in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
+                    elif msg.topic in ("wishlist.view.owner_failed",
+                                       "wishlist.view.viewer_failed",
+                                       "wishlist.view.all_failed",
+                                       "wishlist.view.booked_items_failed"):  # Добавил обработку общих ошибок
                         await self.bot.send_message(msg.value["telegram_id"],
-                                                    msg.value.get("reason", "Failed wishlist."))
+                                                    f"❌ Ошибка просмотра: {escape_markdown(msg.value.get('reason', 'N/A'))}")
                     elif msg.topic == "user.user.allowed":
                         user_id = msg.value.get("user_id")
                         if user_id: update_allowed_users(user_id, allow=True)
@@ -109,6 +117,12 @@ class KafkaBotConsumer:
                             await self.bot.send_message(msg.value.get("telegram_id"),
                                                         f"✅ Товар '{escape_markdown(msg.value.get('name', 'N/A'))}' удален.")
 
+                    elif msg.topic == "wishlist.item.deleted_booker_notification":  # Уведомление для бронировавшего
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"⚠️ Товар '{escape_markdown(msg.value.get('item_name', 'N/A'))}', который ты бронировал, был удален владельцем.")
+
+
                     elif msg.topic == "wishlist.item.booked":
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
@@ -129,7 +143,7 @@ class KafkaBotConsumer:
                         await self._handle_wishlist_parse_failed(msg.value)
 
                 except Exception as e:
-                    logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
+                    logger.error(f"Ошибка обработки сообщения из топика {msg.topic}: {e}", exc_info=True)
         except asyncio.CancelledError:
             logger.info("Задача консумера отменена.")
         except Exception as e:
@@ -149,11 +163,11 @@ class KafkaBotConsumer:
 
         prefilled_name = f"Примерно как по ссылке {source_url}"
 
-        await ctx.set_state(WishlistAddManual.waiting_for_cost)
+        await ctx.set_state(WishlistAddManual.waiting_for_cost)  # Начинаем с цены, имя предзаполнено
         await ctx.update_data(manual_add_data={
             "telegram_id": telegram_id,
             "name": prefilled_name,
-            "item_url": source_url
+            "item_url": source_url  # Сохраняем исходный URL на всякий случай
         })
 
         await self.bot.send_message(telegram_id,
@@ -180,17 +194,27 @@ class KafkaBotConsumer:
         builder = InlineKeyboardBuilder()
         owner_names = []
 
+        processed_ids = set()  # Чтобы избежать дубликатов из-за ошибок get_chat
+
         for owner_id in owner_ids:
-            if owner_id == requester_id:
+            if owner_id == requester_id or owner_id in processed_ids:
                 continue
             try:
+                # Пытаемся получить информацию о чате
                 chat = await self.bot.get_chat(owner_id)
-                name = chat.username or chat.full_name
+                name = chat.username or chat.full_name  # Приоритет username
                 if name:
                     owner_names.append(name)
                     builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
+                    processed_ids.add(owner_id)  # Отмечаем ID как обработанный
+                else:
+                    logger.warning(f"Could not get username or full_name for user {owner_id}")
+
             except Exception as e:
                 logger.warning(f"Could not fetch info for user {owner_id}: {e}")
+                # Можно добавить кнопку с ID, если имя не получено?
+                # builder.button(text=f"ID: {owner_id}", callback_data=f"all_wishlists_select_id:{owner_id}")
+                # processed_ids.add(owner_id)
 
         if not owner_names:
             await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
@@ -207,7 +231,17 @@ class KafkaBotConsumer:
         chat_id = value.get("chat_id")
         text = value.get("text")
         if chat_id and text:
-            await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="MarkdownV2")
+            try:
+                await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="MarkdownV2")
+            except TelegramBadRequest as e:
+                logger.error(f"Failed to send MarkdownV2 message: {e}. Text: {text}")
+                # Пробуем отправить без Markdown
+                try:
+                    await self.bot.send_message(chat_id=chat_id, text=value.get("text"))  # Отправляем исходный текст
+                except Exception as plain_e:
+                    logger.error(f"Failed to send even plain text message: {plain_e}")
+            except Exception as e:
+                logger.error(f"Failed to send text message: {e}")
 
     async def _handle_document_message(self, value: dict):
         chat_id = value.get("chat_id")
@@ -222,7 +256,17 @@ class KafkaBotConsumer:
             return
 
         document = BufferedInputFile(file_bytes, filename=filename)
-        await self.bot.send_document(chat_id, document, caption=caption, parse_mode="MarkdownV2")
+        try:
+            await self.bot.send_document(chat_id, document, caption=caption, parse_mode="MarkdownV2")
+        except TelegramBadRequest as e:
+            logger.error(f"Failed to send document with MarkdownV2 caption: {e}. Caption: {caption}")
+            try:
+                # Пробуем отправить без Markdown
+                await self.bot.send_document(chat_id, document, caption=value.get("caption"))
+            except Exception as plain_e:
+                logger.error(f"Failed to send document even with plain text caption: {plain_e}")
+        except Exception as e:
+            logger.error(f"Failed to send document: {e}")
 
     async def _handle_tickets_list(self, value: dict):
         chat_id = value.get("telegram_id")
@@ -240,7 +284,16 @@ class KafkaBotConsumer:
             builder.button(text="🗑️ Удалить", callback_data=f"delete_ticket:{ticket['ticket_id']}")
 
             def format_dt(dt_str):
-                return escape_markdown(datetime.fromisoformat(dt_str).strftime('%d.%m.%Y в %H:%M')) if dt_str else "н/д"
+                try:
+                    # Проверяем, есть ли микросекунды
+                    if '.' in dt_str:
+                        dt_obj = datetime.fromisoformat(dt_str)
+                    else:
+                        # Если нет, добавляем их для корректного парсинга
+                        dt_obj = datetime.fromisoformat(dt_str + ".000000")
+                    return escape_markdown(dt_obj.strftime('%d.%m.%Y в %H:%M'))
+                except (ValueError, TypeError):
+                    return "н/д"
 
             text = (
                 f"*{escape_markdown(ticket['title'])}*\n\n"
@@ -253,7 +306,19 @@ class KafkaBotConsumer:
                 f"🏁 *Прибытие:* {escape_markdown(ticket.get('arrival_station') or 'н/д')}\n"
                 f"   {format_dt(ticket.get('arrival_datetime'))}"
             )
-            await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
+            try:
+                await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
+            except TelegramBadRequest as e:
+                logger.error(f"Failed to send ticket info with MarkdownV2: {e}. Text: {text}")
+                try:
+                    # Пытаемся отправить без Markdown
+                    plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)  # Убираем экранирование
+                    plain_text = plain_text.replace('*', '').replace('_', '')  # Убираем базовое форматирование
+                    await self.bot.send_message(chat_id, plain_text, reply_markup=builder.as_markup())
+                except Exception as plain_e:
+                    logger.error(f"Failed to send ticket info even plain: {plain_e}")
+            except Exception as e:
+                logger.error(f"Failed to send ticket info: {e}")
 
     async def _handle_wishlist_view(self, value: dict):
         telegram_id = value.get("telegram_id")
@@ -277,12 +342,40 @@ class KafkaBotConsumer:
             "current_index": 0,
             "owner_user_id": owner_user_id
         })
-        text, markup = await build_wishlist_page(ctx, telegram_id)
-        if markup:
-            await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode="MarkdownV2",
-                                        disable_web_page_preview=True)
-        else:
-            await self.bot.send_message(telegram_id, text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+
+        try:
+            text, markup = await build_wishlist_page(ctx, telegram_id)
+        except Exception as build_e:
+            logger.error(f"Error building wishlist page: {build_e}", exc_info=True)
+            await self.bot.send_message(telegram_id, "Ошибка при подготовке вишлиста для отображения.")
+            return
+
+        # --- ИЗМЕНЕНИЯ: Логгирование перед отправкой ---
+        try:
+            if markup:
+                await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode="MarkdownV2",
+                                            disable_web_page_preview=True)
+            else:
+                await self.bot.send_message(telegram_id, text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            logger.error(f"Failed to send wishlist view message (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+            try:
+                # Попытка отправить без Markdown
+                plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)  # Убираем экранирование
+                plain_text = plain_text.replace('*', '').replace('_', '')  # Убираем базовое форматирование
+                if markup:
+                    await self.bot.send_message(telegram_id, plain_text, reply_markup=markup,
+                                                disable_web_page_preview=True)
+                else:
+                    await self.bot.send_message(telegram_id, plain_text, disable_web_page_preview=True)
+                logger.info("Successfully sent wishlist view as plain text after MarkdownV2 failure.")
+            except Exception as plain_e:
+                logger.error(f"Failed to send wishlist view even as plain text: {plain_e}")
+                await self.bot.send_message(telegram_id, "Произошла ошибка при отображении вишлиста.")
+        except Exception as e:
+            logger.error(f"Unexpected error sending wishlist view: {e}", exc_info=True)
+            await self.bot.send_message(telegram_id, "Произошла неожиданная ошибка при отображении вишлиста.")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     async def _handle_user_list_response(self, value: dict):
         admin_id = value.get("admin_id")
