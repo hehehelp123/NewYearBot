@@ -8,7 +8,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.kafka.producer import kafka_producer
 from app.bot.states import WishlistAddManual
 from app.bot.utils import escape_markdown, reset_to_main_menu
-from app.bot.keyboards import build_menu_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,7 @@ async def process_manual_wishlist_name(message: Message, state: FSMContext):
         await message.answer("Нужно название.")
         return
     data = await state.get_data()
+    if "manual_add_data" not in data: data["manual_add_data"] = {}
     data["manual_add_data"]["name"] = message.text
     await state.set_data(data)
     await state.set_state(WishlistAddManual.waiting_for_cost)
@@ -51,6 +51,7 @@ async def process_manual_wishlist_name(message: Message, state: FSMContext):
 
 async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     data = await state.get_data()
+    if "manual_add_data" not in data: data["manual_add_data"] = {}
     if message.text and message.text.lower() != 'пропустить':
         data["manual_add_data"]["cost"] = message.text
     await state.set_data(data)
@@ -60,27 +61,18 @@ async def process_manual_wishlist_cost(message: Message, state: FSMContext):
 
 async def process_manual_wishlist_url(message: Message, state: FSMContext):
     data = await state.get_data()
+    if "manual_add_data" not in data: data["manual_add_data"] = {}
     if message.text and message.text.lower() != 'пропустить':
         data["manual_add_data"]["item_url"] = message.text
-    await state.set_data(data)
-    await state.set_state(WishlistAddManual.waiting_for_delivery)
-    await message.answer("Когда доставить (например, 'в январе', 'срочно', или 'пропустить'):")
-
-
-async def process_manual_wishlist_delivery(message: Message, state: FSMContext):
-    data = await state.get_data()
-    if message.text and message.text.lower() != 'пропустить':
-        data["manual_add_data"]["delivery_date"] = message.text
 
     await state.set_data(data)
     await state.set_state(WishlistAddManual.confirming)
 
-    item = data["manual_add_data"]
+    item = data.get("manual_add_data", {})
     text = f"Проверь:\n"
-    text += f"Название: {item.get('name')}\n"
+    text += f"Название: {item.get('name', 'N/A')}\n"
     text += f"Цена: {item.get('cost', 'N/A')}\n"
     text += f"URL: {item.get('item_url', 'N/A')}\n"
-    text += f"Доставка: {item.get('delivery_date', 'N/A')}\n"
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_manual_confirm:single")
@@ -96,6 +88,7 @@ async def process_manual_wishlist_confirm(query: CallbackQuery, state: FSMContex
     if booking_type == "cancel":
         await query.message.edit_text("Отменено.")
         await state.clear()
+        await reset_to_main_menu(query.message, state)
         return
 
     data = await state.get_data()
@@ -103,6 +96,7 @@ async def process_manual_wishlist_confirm(query: CallbackQuery, state: FSMContex
     if not payload.get("name"):
         await query.message.edit_text("Ошибка. Нет имени. Начни заново.")
         await state.clear()
+        await reset_to_main_menu(query.message, state)
         return
 
     payload["is_infinitely_bookable"] = (booking_type == "infinite")
@@ -115,6 +109,7 @@ async def process_manual_wishlist_confirm(query: CallbackQuery, state: FSMContex
         await query.message.edit_text("Ошибка. Не смог отправить в Kafka.")
 
     await state.clear()
+    await reset_to_main_menu(query.message, state)
 
 
 async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -128,16 +123,23 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
         return "Вишлист пуст\\.", None
 
     item = items[current_index]
-    item_price = escape_markdown(item.get("cost", "N/A"))
-    item_delivery = escape_markdown(item.get("delivery_date", "N/A"))
-    item_name = escape_markdown(item.get("name", "N/A"))
-    item_url = item.get("item_url", "N/A")
+
+    item_price = escape_markdown(str(item.get("cost", "N/A")))
+    item_delivery = escape_markdown(str(item.get("delivery_date", "N/A")))
+    item_name = escape_markdown(str(item.get("name", "N/A")))
+    raw_url = item.get("item_url")
+    escaped_url_text = escape_markdown(str(raw_url if raw_url else "N/A"))
+    item_url_markdown = f"[Link]({escape_markdown(str(raw_url))})" if raw_url else escaped_url_text
+
     is_infinitely_bookable = item.get("is_infinitely_bookable", False)
     bookings = item.get("bookings", [])
 
     text = f"*Товар {current_index + 1}/{len(items)}*\n\n*Название:* {item_name}\n"
-    if item_url:
-        text += f"*URL:* [Link]({item_url})\n"
+
+    if raw_url:
+        text += f"*URL:* {item_url_markdown}\n"
+    else:
+        text += f"*URL:* {escaped_url_text}\n"
 
     is_owner = (owner_user_id == viewer_user_id)
     text += f"*Цена:* {item_price}\n*Доставка:* {item_delivery}\n"
@@ -170,7 +172,7 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
             text += f"*Также забронено:* {len(bookings) - 1} другими\n"
         builder.button(text="🎁 Молить об отмене", callback_data=f"wishlist_unbook:{item_id}")
     elif not is_infinitely_bookable and bookings:
-        booker_id = bookings[0].get("booked_by_user_id", "кто-то")
+        booker_id = bookings[0].get("booked_by_user_id", "кто\\-то")  # Экранируем дефис
         text += f"\n*Статус:* ⛔️ Захвачено {booker_id}\n"
         builder.button(text="⛔️ Захвачен", callback_data="wishlist_noop")
     else:
@@ -215,7 +217,12 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
             await state.update_data(items=items)
 
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Failed to edit message on book: {e}. Text: {text}")
+            await query.message.answer(f"Ошибка отображения: {e}")
         await query.answer("✅ Теперь живи с этим!")
         return
     elif action == "wishlist_unbook":
@@ -229,7 +236,12 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
             ]
             await state.update_data(items=items)
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Failed to edit message on unbook: {e}. Text: {text}")
+            await query.message.answer(f"Ошибка отображения: {e}")
         await query.answer("✅ Мольбы услышаны!")
         return
     elif action == "wishlist_delete":
@@ -247,7 +259,12 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
             new_index = max(0, len(new_items) - 1)
         await state.update_data(items=new_items, current_index=new_index)
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Failed to edit message on delete: {e}. Text: {text}")
+            await query.message.answer(f"Ошибка отображения: {e}")
         await query.answer("✅ Товар удален!")
         return
     elif action == "wishlist_noop":
@@ -262,7 +279,8 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         elif text:
             await query.message.edit_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
     except Exception as e:
-        logger.warning(f"Wishlist nav error: {e}")
+        logger.error(f"Failed to edit message on navigation: {e}. Text: {text}")
+        await query.message.answer(f"Ошибка отображения: {e}")
 
 
 async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):

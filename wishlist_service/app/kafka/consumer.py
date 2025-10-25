@@ -30,7 +30,7 @@ async def handle_wishlist_add_event(event_data: dict):
                 f"No URL found in message from {wishlist_request.telegram_id}: {wishlist_request.source_text}")
             await kafka_producer.send("wishlist.item.add_failed", {
                 "telegram_id": wishlist_request.telegram_id,
-                "source_url": wishlist_request.source_text,  # Keep original text for context
+                "source_url": wishlist_request.source_text,
                 "reason": "No valid URL was found in your message."
             })
             return
@@ -51,26 +51,33 @@ async def handle_wishlist_add_event(event_data: dict):
 
     except Exception as e:
         logger.error(f"Error scheduling scraping task: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.item.add_failed", {
+                "telegram_id": event_data.get("telegram_id", "unknown"),
+                "source_url": event_data.get("source_text", "unknown"),
+                "reason": f"Internal error during task scheduling: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send add_failed event after scheduling error: {kafka_e}")
 
 
 async def handle_wishlist_create_event(event_data: dict):
     try:
-        # Assuming event_data contains 'telegram_id' and 'username'
         wishlist_create_data = WishlistCreate(
             owner_user_id=event_data["telegram_id"],
-            name=event_data["username"]  # Use username from event
+            name=event_data["username"]
         )
         async with AsyncSessionLocal() as session:
             try:
                 service = WishlistService(session)
                 await service.create_wishlist(wishlist_create_data)
             except Exception as e:
-                logger.error(f"Error processing wishlist create event: {e}")
+                logger.error(f"Error processing wishlist create event in service: {e}", exc_info=True)
 
         logger.info(f"Task to create Wishlist for user_id: {wishlist_create_data.owner_user_id} accepted.")
 
     except Exception as e:
-        logger.error(f"Error processing wishlist create event: {e}", exc_info=True)
+        logger.error(f"Error processing wishlist create event handler: {e}", exc_info=True)
 
 
 async def handle_wishlist_add_manual_event(event_data: dict):
@@ -85,6 +92,14 @@ async def handle_wishlist_add_manual_event(event_data: dict):
 
     except Exception as e:
         logger.error(f"Error processing manual add event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.item.add_failed", {
+                "telegram_id": event_data.get("telegram_id", "unknown"),
+                "source_url": event_data.get("item_url") or event_data.get("name", "unknown"),
+                "reason": f"Internal error during manual add: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send add_failed event after manual add error: {kafka_e}")
 
 
 async def handle_wishlist_book_event(event_data: dict):
@@ -102,11 +117,19 @@ async def handle_wishlist_book_event(event_data: dict):
 
     except Exception as e:
         logger.error(f"Error processing book event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.item.book_failed", {
+                "item_id": event_data.get("item_id", "unknown"),
+                "booker_user_id": event_data.get("booker_user_id", "unknown"),
+                "telegram_id": event_data.get("booker_user_id", "unknown"),
+                "reason": f"Internal error during booking: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send book_failed event after booking error: {kafka_e}")
 
 
 async def handle_wishlist_unbook_event(event_data: dict):
     try:
-        # Pydantic schema expects 'booker_user_id', but Kafka event has 'unbooker_user_id'
         unbook_request = ItemBookRequest(
             item_id=event_data["item_id"],
             booker_user_id=event_data["unbooker_user_id"]
@@ -120,6 +143,15 @@ async def handle_wishlist_unbook_event(event_data: dict):
 
     except Exception as e:
         logger.error(f"Error processing unbook event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.item.unbook_failed", {
+                "item_id": event_data.get("item_id", "unknown"),
+                "unbooker_user_id": event_data.get("unbooker_user_id", "unknown"),
+                "telegram_id": event_data.get("unbooker_user_id", "unknown"),
+                "reason": f"Internal error during unbooking: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send unbook_failed event after unbooking error: {kafka_e}")
 
 
 async def handle_wishlist_delete_event(event_data: dict):
@@ -137,31 +169,52 @@ async def handle_wishlist_delete_event(event_data: dict):
 
     except Exception as e:
         logger.error(f"Error processing delete event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.item.delete_failed", {
+                "item_id": event_data.get("item_id", "unknown"),
+                "deleter_user_id": event_data.get("deleter_user_id", "unknown"),
+                "telegram_id": event_data.get("deleter_user_id", "unknown"),
+                "reason": f"Internal error during deletion: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send delete_failed event after deletion error: {kafka_e}")
 
 
 async def handle_wishlist_get_owner(event_data: dict):
     try:
-        # Handle potential key difference ('target_user' vs 'owner_user_name')
         request = WishlistGetRequest(
-            owner_user_name=event_data.get("target_user", event_data.get("owner_user_name")),
+            owner_user_id=event_data.get("owner_user_id"),  # Owner ID is needed here
             requester_user_id=event_data["telegram_id"]
         )
+        if not request.owner_user_id:
+            raise ValueError("'owner_user_id' not found in event data for get_owner")
+
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_wishlist_for_owner(request.owner_user_name, request.requester_user_id)
+            await service.get_and_push_wishlist_for_owner(request.owner_user_id, request.requester_user_id)
         logger.info(
-            f"Task to get owner view for {request.owner_user_name} (requested by {request.requester_user_id}) processed.")
+            f"Task to get owner view for {request.owner_user_id} (requested by {request.requester_user_id}) processed.")
     except Exception as e:
         logger.error(f"Error processing get_owner event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.view.owner_failed", {
+                "owner_user_id": event_data.get("owner_user_id", "unknown"),
+                "telegram_id": event_data.get("telegram_id", "unknown"),
+                "reason": f"Internal error processing get_owner: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send owner_failed event after get_owner error: {kafka_e}")
 
 
 async def handle_wishlist_get_viewer(event_data: dict):
     try:
-        # Handle potential key difference ('target_user' vs 'owner_user_name')
         request = WishlistGetRequest(
             owner_user_name=event_data.get("target_user", event_data.get("owner_user_name")),
             requester_user_id=event_data["telegram_id"]
         )
+        if not request.owner_user_name:
+            raise ValueError("'owner_user_name' or 'target_user' not found in event data for get_viewer")
+
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
             await service.get_and_push_wishlist_for_viewer(request.owner_user_name, request.requester_user_id)
@@ -169,17 +222,24 @@ async def handle_wishlist_get_viewer(event_data: dict):
             f"Task to get viewer view for {request.owner_user_name} (requested by {request.requester_user_id}) processed.")
     except Exception as e:
         logger.error(f"Error processing get_viewer event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.view.viewer_failed", {
+                "owner_user_name": event_data.get("target_user", event_data.get("owner_user_name", "unknown")),
+                "telegram_id": event_data.get("telegram_id", "unknown"),
+                "reason": f"Internal error processing get_viewer: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send viewer_failed event after get_viewer error: {kafka_e}")
 
 
 async def handle_wishlist_get_booked(event_data: dict):
     try:
         requester_user_id = event_data["telegram_id"]
-        async with AsyncSessionLocal() as session:
-            service = WishlistService(session)
-            # await service.get_and_push_booked_items_for_user(requester_user_id) # Ensure this method exists
-            logger.warning(
-                f"Handler 'get_booked' might not be fully implemented in WishlistService for user {requester_user_id}.")
-        logger.info(f"Task to get booked items for user {requester_user_id} processed.")
+        logger.warning(f"Handler 'get_booked' is not implemented. Skipping for user {requester_user_id}.")
+        await kafka_producer.send("wishlist.view.booked_items_failed", {
+            "telegram_id": requester_user_id,
+            "reason": "This feature is not yet implemented."
+        })
     except Exception as e:
         logger.error(f"Error processing get_booked event: {e}", exc_info=True)
 
@@ -189,12 +249,17 @@ async def handle_wishlist_get_all(event_data: dict):
         requester_user_id = event_data["telegram_id"]
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            # await service.get_and_push_all_wishlist_owners(requester_user_id) # Ensure this method exists
-            logger.warning(
-                f"Handler 'get_all' might not be fully implemented in WishlistService for user {requester_user_id}.")
+            await service.get_and_push_all_wishlist_owners(requester_user_id)
         logger.info(f"Task to get all wishlist owners for user {requester_user_id} processed.")
     except Exception as e:
         logger.error(f"Error processing get_all event: {e}", exc_info=True)
+        try:
+            await kafka_producer.send("wishlist.view.all_failed", {
+                "telegram_id": event_data.get("telegram_id", "unknown"),
+                "reason": f"Internal error processing get_all: {e}"
+            })
+        except Exception as kafka_e:
+            logger.error(f"Failed to send all_failed event after get_all error: {kafka_e}")
 
 
 class KafkaConsumer:
@@ -220,6 +285,10 @@ class KafkaConsumer:
     async def stop(self):
         if self.task:
             self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                logger.info("Consumer task cancelled.")
         if self.consumer:
             await self.consumer.stop()
         logger.info("Consumer остановлен.")
@@ -241,7 +310,7 @@ class KafkaConsumer:
                     await handle_wishlist_unbook_event(msg.value)
                 elif msg.topic == "wishlist.item.delete":
                     await handle_wishlist_delete_event(msg.value)
-                elif msg.topic == "wishlist.view.owner":  # Added missing topic
+                elif msg.topic == "wishlist.view.owner":
                     await handle_wishlist_get_owner(msg.value)
                 elif msg.topic == "wishlist.view.viewer":
                     await handle_wishlist_get_viewer(msg.value)
@@ -251,5 +320,7 @@ class KafkaConsumer:
                     await handle_wishlist_get_all(msg.value)
         except asyncio.CancelledError:
             logger.info("Задача консумера отменена.")
+        except Exception as e:
+            logger.error(f"Critical error in consumer loop: {e}", exc_info=True)
         finally:
             logger.info("Цикл консумера завершен.")
