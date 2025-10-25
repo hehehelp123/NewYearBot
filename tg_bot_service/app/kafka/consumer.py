@@ -10,7 +10,7 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import BufferedInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
-from app.bot.bot_app import build_wishlist_page, WishlistBrowser, UserRemoval, AllWishlistsBrowser
+from app.bot.bot_app import build_wishlist_page, WishlistBrowser, UserRemoval, AllWishlistsBrowser, WishlistAddManual
 from app.middlewares.access_middleware import update_allowed_users
 
 from app.core.config import settings
@@ -74,10 +74,11 @@ class KafkaBotConsumer:
                         await self._handle_document_message(msg.value)
                     elif msg.topic == "notification.send.tickets":
                         await self._handle_tickets_list(msg.value)
-                    elif msg.topic in "wishlist.view.viewer_success":
+                    elif msg.topic == "wishlist.view.viewer_success":
                         await self._handle_wishlist_view(msg.value)
                     elif msg.topic in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
-                        await self.bot.send_message(msg.value["telegram_id"], msg.value.get("error", "Failed wishlist."))
+                        await self.bot.send_message(msg.value["telegram_id"],
+                                                    msg.value.get("reason", "Failed wishlist."))
                     elif msg.topic == "user.user.allowed":
                         user_id = msg.value.get("user_id")
                         if user_id: update_allowed_users(user_id, allow=True)
@@ -86,9 +87,38 @@ class KafkaBotConsumer:
                         if user_id: update_allowed_users(user_id, allow=False)
                     elif msg.topic == "user.user.list_response":
                         await self._handle_user_list_response(msg.value)
-                    elif msg.topic == "wishlist.view.all_success": 
+                    elif msg.topic == "wishlist.view.all_success":
                         await self._handle_all_wishlists_view(msg.value)
-    
+
+                    elif msg.topic == "wishlist.item.added":
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"✅ Товар '{escape_markdown(msg.value.get('name', 'N/A'))}' добавлен!")
+
+                    elif msg.topic == "wishlist.item.deleted":
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"✅ Товар '{escape_markdown(msg.value.get('name', 'N/A'))}' удален.")
+
+                    elif msg.topic == "wishlist.item.booked":
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"✅ Ты забронил '{escape_markdown(msg.value.get('item_name', 'N/A'))}'!")
+
+                    elif msg.topic == "wishlist.item.unbooked":
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"✅ Ты снял бронь с '{escape_markdown(msg.value.get('item_name', 'N/A'))}'.")
+
+                    elif msg.topic in ("wishlist.item.add_failed", "wishlist.item.book_failed",
+                                       "wishlist.item.unbook_failed", "wishlist.item.delete_failed"):
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value.get("telegram_id"),
+                                                        f"❌ Ошибка: {escape_markdown(msg.value.get('reason', 'N/A'))}")
+
+                    elif msg.topic == "wishlist.item.parse_failed":
+                        await self._handle_wishlist_parse_failed(msg.value)
+
                 except Exception as e:
                     logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
         except asyncio.CancelledError:
@@ -98,47 +128,72 @@ class KafkaBotConsumer:
         finally:
             logger.info("Цикл консумера завершен.")
 
+    async def _handle_wishlist_parse_failed(self, value: dict):
+        telegram_id = value.get("telegram_id")
+        source_url = value.get("source_url", "")
+        if not telegram_id:
+            return
+
+        logger.warning(f"Parse failed for user {telegram_id}, url {source_url}")
+
+        ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
+
+        prefilled_name = f"Примерно как по ссылке {source_url}"
+
+        await ctx.set_state(WishlistAddManual.waiting_for_cost)
+        await ctx.update_data(manual_add_data={
+            "telegram_id": telegram_id,
+            "name": prefilled_name,
+            "item_url": source_url
+        })
+
+        await self.bot.send_message(telegram_id,
+                                    f"Не смог спарсить инфу по ссылке. 😥\n"
+                                    f"Давай добавим руками. Я заполнил название:\n*{escape_markdown(prefilled_name)}*\n\n"
+                                    f"Введи примерную цену (или 'пропустить'):"
+                                    )
+
     async def _handle_all_wishlists_view(self, value: dict):
-            requester_id = value.get("telegram_id")
-            owner_ids = value.get("owner_user_ids", [])
-            
-            if not requester_id:
-                logger.warning(f"No telegram_id in all_wishlists_view payload: {value}")
-                return
-                
-            ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=requester_id, chat_id=requester_id))
-            
-            if not owner_ids:
-                await self.bot.send_message(requester_id, "Пока никто не создал вишлист.")
-                await ctx.clear()
-                return
-            
-            builder = InlineKeyboardBuilder()
-            owner_names = []
-            
-            for owner_id in owner_ids:
-                if owner_id == requester_id:
-                    continue
-                try:
-                    chat = await self.bot.get_chat(owner_id)
-                    name = chat.username or chat.full_name
-                    if name:
-                        owner_names.append(name)
-                        builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
-                except Exception as e:
-                    logger.warning(f"Could not fetch info for user {owner_id}: {e}")
-                    
-            if not owner_names:
-                await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
-                await ctx.clear()
-                return
-                
-            builder.adjust(2)
-            builder.row(InlineKeyboardButton(text="❌ Закрыть", callback_data="all_wishlists_close"))
-            
-            await ctx.set_state(AllWishlistsBrowser.choosing_owner)
-            await self.bot.send_message(requester_id, "Выбери, чей вишлист посмотреть:", reply_markup=builder.as_markup())
-    
+        requester_id = value.get("telegram_id")
+        owner_ids = value.get("owner_user_ids", [])
+
+        if not requester_id:
+            logger.warning(f"No telegram_id in all_wishlists_view payload: {value}")
+            return
+
+        ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=requester_id, chat_id=requester_id))
+
+        if not owner_ids:
+            await self.bot.send_message(requester_id, "Пока никто не создал вишлист.")
+            await ctx.clear()
+            return
+
+        builder = InlineKeyboardBuilder()
+        owner_names = []
+
+        for owner_id in owner_ids:
+            if owner_id == requester_id:
+                continue
+            try:
+                chat = await self.bot.get_chat(owner_id)
+                name = chat.username or chat.full_name
+                if name:
+                    owner_names.append(name)
+                    builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
+            except Exception as e:
+                logger.warning(f"Could not fetch info for user {owner_id}: {e}")
+
+        if not owner_names:
+            await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
+            await ctx.clear()
+            return
+
+        builder.adjust(2)
+        builder.row(InlineKeyboardButton(text="❌ Закрыть", callback_data="all_wishlists_close"))
+
+        await ctx.set_state(AllWishlistsBrowser.choosing_owner)
+        await self.bot.send_message(requester_id, "Выбери, чей вишлист посмотреть:", reply_markup=builder.as_markup())
+
     async def _handle_text_message(self, value: dict):
         chat_id = value.get("chat_id")
         text = value.get("text")

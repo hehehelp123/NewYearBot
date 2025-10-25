@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -20,14 +20,15 @@ class WishlistItem(Base):
     item_url = Column(String, nullable=True)
     added_at = Column(DateTime, server_default=func.now(), nullable=False)
     wishlist = relationship("Wishlist", back_populates="items")
-    booking = relationship("ItemBooking", back_populates="item", uselist=False)
+    bookings = relationship("ItemBooking", back_populates="item")
     cost = Column(String, nullable=True)
     delivery_date = Column(String, nullable=True)
+    is_infinitely_bookable = Column(Boolean, default=False, nullable=False)
 
 class ItemBooking(Base):
     __tablename__ = 'item_bookings'
     booking_id = Column(Integer, primary_key=True)
-    item_id = Column(Integer, ForeignKey('wishlist_items.item_id'), unique=True, nullable=False)
+    item_id = Column(Integer, ForeignKey('wishlist_items.item_id'), nullable=False)
     booked_by_user_id = Column(Integer, nullable=False)
     booked_at = Column(DateTime, server_default=func.now(), nullable=False)
-    item = relationship("WishlistItem", back_populates="booking")
+    item = relationship("WishlistItem", back_populates="bookings")

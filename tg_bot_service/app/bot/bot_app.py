@@ -34,8 +34,18 @@ class ActionForm(StatesGroup):
 class WishlistBrowser(StatesGroup):
     browsing = State()
 
+
+class WishlistAddManual(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_cost = State()
+    waiting_for_url = State()
+    waiting_for_delivery = State()
+    confirming = State()
+
+
 class AllWishlistsBrowser(StatesGroup):
     choosing_owner = State()
+
 
 class MediaUpload(StatesGroup):
     waiting_for_year = State()
@@ -59,6 +69,7 @@ VIEW_ALBUMS_BUTTON = "🖼️ Смотреть кто что загрузил"
 STOP_UPLOAD_BUTTON = "✅ Все чё мог то загрузил"
 ADMIN_ADD_USER_BUTTON = "🔑 Добавить юзера по ID"
 ADMIN_REMOVE_USER_BUTTON = "🚫 Удалить юзера"
+ADD_WISHLIST_ITEM_MANUALLY_BUTTON = "🎁 Добавить товар (руками)"
 
 WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIbhS-7FY2lmbDJ-AQADAgADeAADNgQ"
 WELCOME_TEXT = (
@@ -163,7 +174,7 @@ async def start_button_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
     user_id = message.from_user.id
     item_names = await get_root_items(user_id)
-    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON, ADD_WISHLIST_ITEM_MANUALLY_BUTTON])
     kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
     schema = await load_schema()
     await state.update_data(current_node=schema)
@@ -220,7 +231,7 @@ async def show_main_menu_callback(query: CallbackQuery, state: FSMContext):
     await query.answer()
     user_id = query.from_user.id
     item_names = await get_root_items(user_id)
-    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON, ADD_WISHLIST_ITEM_MANUALLY_BUTTON])
     if item_names:
         schema = await load_schema()
         await state.update_data(current_node=schema)
@@ -246,7 +257,8 @@ async def show_info_callback(query: CallbackQuery):
             builder.button(text=name, url=f"tg://user?id={user_id}")
         builder.button(text="⬅️ Назад", callback_data="info:back_to_welcome")
         builder.adjust(1)
-        await query.message.edit_caption(caption="По всем вопросам к ним (за экзистенциальные будете наказаны).", reply_markup=builder.as_markup())
+        await query.message.edit_caption(caption="По всем вопросам к ним (за экзистенциальные будете наказаны).",
+                                         reply_markup=builder.as_markup())
         await query.answer()
     elif action == "back_to_welcome":
         kb = await welcome_keyboard()
@@ -257,6 +269,28 @@ async def show_info_callback(query: CallbackQuery):
 async def menu_handler(message: Message, state: FSMContext) -> None:
     if not message.text or not message.from_user: return
     logger.debug(f"Menu handler: '{message.text}' from {message.from_user.id}")
+
+    url_match = re.search(r'https?://[^\s/$.?#].[^\s]*', message.text)
+    if url_match:
+        logger.info(f"User {message.from_user.id} sent text with URL: {message.text}")
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🎁 Обычный (1 бронь)", callback_data=f"wishlist_add_url:single:{message.text}")
+        builder.button(text="♾️ Общий (много броней)", callback_data=f"wishlist_add_url:infinite:{message.text}")
+        builder.button(text="❌ Отмена", callback_data="wishlist_add_url:cancel")
+        builder.adjust(2, 1)
+        await message.answer(
+            "Добавляем товар по ссылке. Этот товар 'общий' (его могут забронировать несколько) или 'обычный' (только один)?",
+            reply_markup=builder.as_markup())
+        return
+
+    if message.text == ADD_WISHLIST_ITEM_MANUALLY_BUTTON:
+        await state.set_state(WishlistAddManual.waiting_for_name)
+        await state.update_data(manual_add_data={
+            "telegram_id": message.from_user.id
+        })
+        await message.answer("Введи название товара:", reply_markup=build_menu_keyboard([], add_start=True))
+        return
+
     data = await state.get_data()
     current_node = data.get("current_node", await load_schema())
     selected = find_item_by_name(message.text, current_node, message.from_user.id)
@@ -286,6 +320,110 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
 
     if selected.get("type") == "action":
         await start_form_action(selected, message, state)
+
+
+async def wishlist_add_url_handler(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    action, booking_type, *text_parts = query.data.split(":", 2)
+
+    if booking_type == "cancel":
+        await query.message.edit_text("Отменено.")
+        return
+
+    source_text = ":".join(text_parts)
+    is_infinitely_bookable = (booking_type == "infinite")
+
+    payload = {
+        "source_text": source_text,
+        "telegram_id": query.from_user.id,
+        "is_infinitely_bookable": is_infinitely_bookable
+    }
+
+    try:
+        await kafka_producer.send("wishlist.wishlist.add", payload)
+        await query.message.edit_text("Отлично! Отправил ссылку на обработку. Я пришлю уведомление, когда закончу.")
+    except Exception as e:
+        logger.error(f"Kafka error on 'wishlist.wishlist.add': {e}")
+        await query.message.edit_text("Ошибка. Не смог отправить в Kafka.")
+
+
+async def process_manual_wishlist_name(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Нужно название.")
+        return
+    data = await state.get_data()
+    data["manual_add_data"]["name"] = message.text
+    await state.set_data(data)
+    await state.set_state(WishlistAddManual.waiting_for_cost)
+    await message.answer("Теперь введи примерную цену (или 'пропустить'):")
+
+
+async def process_manual_wishlist_cost(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if message.text and message.text.lower() != 'пропустить':
+        data["manual_add_data"]["cost"] = message.text
+    await state.set_data(data)
+    await state.set_state(WishlistAddManual.waiting_for_url)
+    await message.answer("Добавь ссылку (или 'пропустить'):")
+
+
+async def process_manual_wishlist_url(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if message.text and message.text.lower() != 'пропустить':
+        data["manual_add_data"]["item_url"] = message.text
+    await state.set_data(data)
+    await state.set_state(WishlistAddManual.waiting_for_delivery)
+    await message.answer("Когда доставить (например, 'в январе', 'срочно', или 'пропустить'):")
+
+
+async def process_manual_wishlist_delivery(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if message.text and message.text.lower() != 'пропустить':
+        data["manual_add_data"]["delivery_date"] = message.text
+
+    await state.set_data(data)
+    await state.set_state(WishlistAddManual.confirming)
+
+    item = data["manual_add_data"]
+    text = f"Проверь:\n"
+    text += f"Название: {item.get('name')}\n"
+    text += f"Цена: {item.get('cost', 'N/A')}\n"
+    text += f"URL: {item.get('item_url', 'N/A')}\n"
+    text += f"Доставка: {item.get('delivery_date', 'N/A')}\n"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_manual_confirm:single")
+    builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_manual_confirm:infinite")
+    builder.button(text="❌ Отмена", callback_data="wishlist_manual_confirm:cancel")
+    await message.answer(text, reply_markup=builder.as_markup())
+
+
+async def process_manual_wishlist_confirm(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    action, booking_type = query.data.split(":")
+
+    if booking_type == "cancel":
+        await query.message.edit_text("Отменено.")
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    payload = data.get("manual_add_data", {})
+    if not payload.get("name"):
+        await query.message.edit_text("Ошибка. Нет имени. Начни заново.")
+        await state.clear()
+        return
+
+    payload["is_infinitely_bookable"] = (booking_type == "infinite")
+
+    try:
+        await kafka_producer.send("wishlist.item.add_manual", payload)
+        await query.message.edit_text("Сохранил!")
+    except Exception as e:
+        logger.error(f"Kafka error on 'wishlist.item.add_manual': {e}")
+        await query.message.edit_text("Ошибка. Не смог отправить в Kafka.")
+
+    await state.clear()
 
 
 async def start_form_action(action: dict, message: Message, state: FSMContext):
@@ -468,7 +606,7 @@ async def reset_to_main_menu(message: Message, state: FSMContext, is_action_fini
     logging.info("state_clear")
     user_id = message.from_user.id
     item_names = await get_root_items(user_id)
-    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+    item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON, ADD_WISHLIST_ITEM_MANUALLY_BUTTON])
     kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
     schema = await load_schema()
     await state.update_data(current_node=schema)
@@ -714,14 +852,19 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     item_delivery = escape_markdown(item.get("delivery_date", "N/A"))
     item_name = escape_markdown(item.get("name", "N/A"))
     item_url = item.get("item_url", "N/A")
+    is_infinitely_bookable = item.get("is_infinitely_bookable", False)
+    bookings = item.get("bookings", [])
 
     text = f"*Товар {current_index + 1}/{len(items)}*\n\n*Название:* {item_name}\n"
     if item_url:
         text += f"*URL:* [Link]({item_url})\n"
 
-    booking_info = item.get("booking")
     is_owner = (owner_user_id == viewer_user_id)
     text += f"*Цена:* {item_price}\n*Доставка:* {item_delivery}\n"
+
+    if is_infinitely_bookable:
+        text += "*Тип:* ♾️ Общий (можно бронить многим)\n"
+
     builder = InlineKeyboardBuilder()
     nav_buttons = []
 
@@ -734,25 +877,33 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     builder.row(*nav_buttons)
     item_id = item.get('item_id', 'unknown')
 
-    if booking_info:
-        booker_id = booking_info.get("booked_by_user_id")
-        if booker_id == viewer_user_id:
-            text += f"\n*Статус:* 🎁 Забронено тобой\\!\n"
-            builder.button(text="🎁 Снять бронь", callback_data=f"wishlist_unbook:{item_id}")
-        else:
-            text += f"\n*Статус:* ⛔️ Забронено {booker_id}\n"
-            builder.button(text="⛔️ Забронен", callback_data="wishlist_noop")
-    elif is_owner:
+    my_booking = next((b for b in bookings if b.get("booked_by_user_id") == viewer_user_id), None)
+
+    if is_owner:
         text += f"\n*Статус:* ✅ Твой товар\n"
+        if bookings:
+            text += f"*Забронено:* {len(bookings)} раз\n"
         builder.button(text="🗑️ Удалить", callback_data=f"wishlist_delete:{item_id}")
+    elif my_booking:
+        text += f"\n*Статус:* 🎁 Забронено тобой\\!\n"
+        if is_infinitely_bookable and len(bookings) > 1:
+            text += f"*Также забронено:* {len(bookings) - 1} другими\n"
+        builder.button(text="🎁 Снять бронь", callback_data=f"wishlist_unbook:{item_id}")
+    elif not is_infinitely_bookable and bookings:
+        booker_id = bookings[0].get("booked_by_user_id", "кто-то")
+        text += f"\n*Статус:* ⛔️ Забронено {booker_id}\n"
+        builder.button(text="⛔️ Забронен", callback_data="wishlist_noop")
     else:
         text += f"\n*Статус:* ✅ Доступен\n"
+        if is_infinitely_bookable and bookings:
+            text += f"*Уже забронено:* {len(bookings)} раз\n"
         builder.button(text="🎁 Забронить", callback_data=f"wishlist_book:{item_id}")
 
     return text, builder.as_markup()
 
 
 async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
+    await query.answer()
     action, *value = query.data.split(":")
     data = await state.get_data()
     items = data.get("items", [])
@@ -770,30 +921,34 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
     elif action == "wishlist_close":
         await query.message.delete()
         await reset_to_main_menu(query.message, state)
-        await query.answer()
         return
     elif action == "wishlist_book":
         item_id = int(value[0])
         await kafka_producer.send("wishlist.item.book", {"item_id": item_id, "booker_user_id": query.from_user.id})
         logger.info(f"{query.from_user.id} booked {item_id}")
         if items and 0 <= current_index < len(items):
-            items[current_index]['booking'] = {'booked_by_user_id': query.from_user.id,
-                                               'booked_at': datetime.utcnow().isoformat()}
+            new_booking_info = {'booked_by_user_id': query.from_user.id,
+                                'booked_at': datetime.utcnow().isoformat()}
+            if 'bookings' not in items[current_index] or items[current_index]['bookings'] is None:
+                items[current_index]['bookings'] = []
+            items[current_index]['bookings'].append(new_booking_info)
             await state.update_data(items=items)
+
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
-        await query.answer("✅ Забронено!")
+        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         return
     elif action == "wishlist_unbook":
         item_id = int(value[0])
         await kafka_producer.send("wishlist.item.unbook", {"item_id": item_id, "unbooker_user_id": query.from_user.id})
         logger.info(f"{query.from_user.id} unbooked {item_id}")
         if items and 0 <= current_index < len(items):
-            items[current_index]['booking'] = None
+            items[current_index]['bookings'] = [
+                b for b in items[current_index].get('bookings', [])
+                if b.get('booked_by_user_id') != query.from_user.id
+            ]
             await state.update_data(items=items)
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
-        await query.answer("✅ Бронь снята!")
+        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         return
     elif action == "wishlist_delete":
         item_id = int(value[0])
@@ -803,15 +958,13 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         if not new_items:
             await state.update_data(items=[], current_index=0)
             await query.message.edit_text("✅ Товар удален. Пусто.", reply_markup=None)
-            await query.answer("Удалено. Пусто.", show_alert=True)
             return
         new_index = current_index
         if new_index >= len(new_items):
             new_index = max(0, len(new_items) - 1)
         await state.update_data(items=new_items, current_index=new_index)
         text, markup = await build_wishlist_page(state, query.from_user.id)
-        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
-        await query.answer("✅ Удалено!")
+        await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         return
     elif action == "wishlist_noop":
         await query.answer()
@@ -820,22 +973,23 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
     try:
         text, markup = await build_wishlist_page(state, query.from_user.id)
         if text and markup:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2")
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                          disable_web_page_preview=True)
         elif text:
-            await query.message.edit_text(text, parse_mode="MarkdownV2")
+            await query.message.edit_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
     except Exception as e:
         logger.warning(f"Wishlist nav error: {e}")
-        await query.answer()
+
 
 async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
     await query.answer()
     action, *value = query.data.split(":", 1)
-    
+
     if action == "all_wishlists_close":
         await query.message.delete()
         await state.clear()
         return
-    
+
     if action == "all_wishlists_select":
         owner_name = value[0]
         requester_id = query.from_user.id
