@@ -175,7 +175,7 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     else:
         builder.button(text="🗑️ Удалить", callback_data=f"wishlist_delete:{item_id}")
 
-    return text, builder.as_markup() if builder._buttons else None
+    return text, builder.as_markup()
 
 
 async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
@@ -338,7 +338,7 @@ async def build_booked_item_page(state: FSMContext, viewer_user_id: int) -> tupl
     item_id = item.get('item_id', 'unknown')
     builder.button(text="🎁 Снять бронь", callback_data=f"unbook_booked_item:{item_id}")
 
-    return text, builder.as_markup() if builder._buttons else None
+    return text, builder.as_markup()
 
 
 async def booked_items_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
