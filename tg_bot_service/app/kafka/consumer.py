@@ -279,9 +279,10 @@ class KafkaBotConsumer:
         })
         text, markup = await build_wishlist_page(ctx, telegram_id)
         if markup:
-            await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode="MarkdownV2")
+            await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode="MarkdownV2",
+                                        disable_web_page_preview=True)
         else:
-            await self.bot.send_message(telegram_id, text, parse_mode="MarkdownV2")
+            await self.bot.send_message(telegram_id, text, parse_mode="MarkdownV2", disable_web_page_preview=True)
 
     async def _handle_user_list_response(self, value: dict):
         admin_id = value.get("admin_id")

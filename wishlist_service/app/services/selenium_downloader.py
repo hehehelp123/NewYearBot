@@ -47,8 +47,11 @@ class SeleniumDownloader:
                 driver.quit()
                 logger.info("Сессия Selenium (Wishlist) закрыта.")
 
-
     async def run_cookie_export_background(self):
+        if os.path.exists(COOKIE_FILE):
+            logger.info(f"BACKGROUND TASK: Cookie file {COOKIE_FILE} already exists. Skipping export.")
+            return
+
         logger.info("BACKGROUND TASK: Starting cookie export (Wishlist)...")
         try:
             async with self.get_driver_session() as driver:
@@ -63,7 +66,8 @@ class SeleniumDownloader:
         cookie_jar = http.cookiejar.MozillaCookieJar()
 
         all_cookies_dicts = []
-        domains_to_export = ["https://www.ozon.ru/", "https://market.yandex.ru/", "https://www.wildberries.ru", "https://aliexpress.ru"]
+        domains_to_export = ["https://www.ozon.ru/", "https://market.yandex.ru/", "https://www.wildberries.ru",
+                             "https://aliexpress.ru"]
 
         for url in domains_to_export:
             try:
@@ -109,5 +113,6 @@ class SeleniumDownloader:
         os.makedirs(os.path.dirname(COOKIE_FILE), exist_ok=True)
         cookie_jar.save(COOKIE_FILE, ignore_discard=True, ignore_expires=False)
         logger.info(f"Cookies (Wishlist) успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
+
 
 selenium_downloader = SeleniumDownloader()

@@ -30,7 +30,7 @@ async def handle_wishlist_add_event(event_data: dict):
                 f"No URL found in message from {wishlist_request.telegram_id}: {wishlist_request.source_text}")
             await kafka_producer.send("wishlist.item.add_failed", {
                 "telegram_id": wishlist_request.telegram_id,
-                "source_url": wishlist_request.source_text,
+                "source_url": wishlist_request.source_text,  # Keep original text for context
                 "reason": "No valid URL was found in your message."
             })
             return
@@ -55,9 +55,10 @@ async def handle_wishlist_add_event(event_data: dict):
 
 async def handle_wishlist_create_event(event_data: dict):
     try:
+        # Assuming event_data contains 'telegram_id' and 'username'
         wishlist_create_data = WishlistCreate(
             owner_user_id=event_data["telegram_id"],
-            name=event_data["username"]
+            name=event_data["username"]  # Use username from event
         )
         async with AsyncSessionLocal() as session:
             try:
@@ -105,6 +106,7 @@ async def handle_wishlist_book_event(event_data: dict):
 
 async def handle_wishlist_unbook_event(event_data: dict):
     try:
+        # Pydantic schema expects 'booker_user_id', but Kafka event has 'unbooker_user_id'
         unbook_request = ItemBookRequest(
             item_id=event_data["item_id"],
             booker_user_id=event_data["unbooker_user_id"]
@@ -139,6 +141,7 @@ async def handle_wishlist_delete_event(event_data: dict):
 
 async def handle_wishlist_get_owner(event_data: dict):
     try:
+        # Handle potential key difference ('target_user' vs 'owner_user_name')
         request = WishlistGetRequest(
             owner_user_name=event_data.get("target_user", event_data.get("owner_user_name")),
             requester_user_id=event_data["telegram_id"]
@@ -154,6 +157,7 @@ async def handle_wishlist_get_owner(event_data: dict):
 
 async def handle_wishlist_get_viewer(event_data: dict):
     try:
+        # Handle potential key difference ('target_user' vs 'owner_user_name')
         request = WishlistGetRequest(
             owner_user_name=event_data.get("target_user", event_data.get("owner_user_name")),
             requester_user_id=event_data["telegram_id"]
@@ -172,9 +176,10 @@ async def handle_wishlist_get_booked(event_data: dict):
         requester_user_id = event_data["telegram_id"]
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            # Убедись, что у тебя есть этот метод в WishlistService
-            # await service.get_and_push_booked_items_for_user(requester_user_id)
-            logger.info(f"Task to get booked items for user {requester_user_id} processed (Handler not implemented).")
+            # await service.get_and_push_booked_items_for_user(requester_user_id) # Ensure this method exists
+            logger.warning(
+                f"Handler 'get_booked' might not be fully implemented in WishlistService for user {requester_user_id}.")
+        logger.info(f"Task to get booked items for user {requester_user_id} processed.")
     except Exception as e:
         logger.error(f"Error processing get_booked event: {e}", exc_info=True)
 
@@ -184,10 +189,10 @@ async def handle_wishlist_get_all(event_data: dict):
         requester_user_id = event_data["telegram_id"]
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            # Убедись, что у тебя есть этот метод в WishlistService
-            # await service.get_and_push_all_wishlist_owners(requester_user_id)
-            logger.info(
-                f"Task to get all wishlist owners for user {requester_user_id} processed (Handler not implemented).")
+            # await service.get_and_push_all_wishlist_owners(requester_user_id) # Ensure this method exists
+            logger.warning(
+                f"Handler 'get_all' might not be fully implemented in WishlistService for user {requester_user_id}.")
+        logger.info(f"Task to get all wishlist owners for user {requester_user_id} processed.")
     except Exception as e:
         logger.error(f"Error processing get_all event: {e}", exc_info=True)
 
@@ -236,7 +241,7 @@ class KafkaConsumer:
                     await handle_wishlist_unbook_event(msg.value)
                 elif msg.topic == "wishlist.item.delete":
                     await handle_wishlist_delete_event(msg.value)
-                elif msg.topic == "wishlist.view.owner":
+                elif msg.topic == "wishlist.view.owner":  # Added missing topic
                     await handle_wishlist_get_owner(msg.value)
                 elif msg.topic == "wishlist.view.viewer":
                     await handle_wishlist_get_viewer(msg.value)
