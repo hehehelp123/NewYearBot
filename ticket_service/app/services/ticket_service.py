@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload
 from app.models.ticket_models import Ticket
-from app.services.pdf_parser import PDFParser
+from app.utils.ticket_parser import TicketPDFParser
 from app.schemas.ticket_schemas import TicketCreate
 from typing import List, Optional
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class TicketService:
     def __init__(self):
-        self.pdf_parser = PDFParser()
+        self.pdf_parser = TicketPDFParser()
 
     async def create_ticket(
             self,
