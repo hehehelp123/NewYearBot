@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from app.core.config import settings
 from app.core.http_client import http_client
-from app.kafka.consumer import KafkaBotConsumer
+from app.kafka.consumer import KafkaBotConsumer, CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON
 from app.kafka.producer import kafka_producer
 from app.middlewares.access_middleware import AccessMiddleware
 
@@ -19,7 +19,7 @@ from app.bot.constants import (
 )
 from app.bot.states import (
     ActionForm, AllWishlistsBrowser, WishlistBrowser, MediaUpload, AlbumBrowser,
-    UserRemoval, WishlistAddManual
+    UserRemoval, WishlistAddManual, BookedItemsBrowser
 )
 
 from app.handlers.common import (
@@ -40,13 +40,17 @@ from app.handlers.wishlist import (
     all_wishlists_navigation_handler, wishlist_navigation_handler,
     wishlist_add_url_handler, process_manual_wishlist_name,
     process_manual_wishlist_cost, process_manual_wishlist_url,
-    process_manual_wishlist_confirm
+    process_manual_wishlist_confirm, booked_items_navigation_handler
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logging.basicConfig(level=logging.INFO); logging.info("Lifespan start")
-    await http_client.start(); bot = Bot(token=settings.BOT_TOKEN); app.state.bot = bot
+    logging.basicConfig(level=logging.INFO);
+    logging.info("Lifespan start")
+    await http_client.start();
+    bot = Bot(token=settings.BOT_TOKEN);
+    app.state.bot = bot
     dp = Dispatcher()
 
     dp.update.outer_middleware(AccessMiddleware())
@@ -81,9 +85,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(start_button_handler, F.text == START_BUTTON, StateFilter("*"))
 
     dp.callback_query.register(wishlist_navigation_handler, StateFilter(WishlistBrowser.browsing))
+    dp.callback_query.register(booked_items_navigation_handler, StateFilter(BookedItemsBrowser.browsing))
     dp.callback_query.register(album_navigation_handler, StateFilter(AlbumBrowser))
-    dp.callback_query.register(handle_remove_user_confirm, StateFilter(UserRemoval.choosing_user), F.data.startswith("remove_user_confirm:"))
-    dp.callback_query.register(handle_remove_user_delete, StateFilter(UserRemoval.confirming_delete), F.data.startswith("remove_user_delete:"))
+    dp.callback_query.register(handle_remove_user_confirm, StateFilter(UserRemoval.choosing_user),
+                               F.data.startswith("remove_user_confirm:"))
+    dp.callback_query.register(handle_remove_user_delete, StateFilter(UserRemoval.confirming_delete),
+                               F.data.startswith("remove_user_delete:"))
     dp.callback_query.register(handle_remove_user_cancel, StateFilter(UserRemoval), F.data == "remove_user_cancel")
 
     dp.message.register(process_action_field, StateFilter(ActionForm.waiting_for_field), F.text | F.document)
@@ -94,26 +101,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(process_manual_wishlist_name, StateFilter(WishlistAddManual.waiting_for_name), F.text)
     dp.message.register(process_manual_wishlist_cost, StateFilter(WishlistAddManual.waiting_for_cost), F.text)
     dp.message.register(process_manual_wishlist_url, StateFilter(WishlistAddManual.waiting_for_url), F.text)
-    dp.callback_query.register(process_manual_wishlist_confirm, StateFilter(WishlistAddManual.confirming), F.data.startswith("wishlist_manual_confirm:"))
+    dp.callback_query.register(process_manual_wishlist_confirm, StateFilter(WishlistAddManual.confirming),
+                               F.data.startswith("wishlist_manual_confirm:"))
 
     dp.message.register(start_handler, F.text == "/start")
     dp.message.register(back_to_welcome_handler, F.text == BACK_TO_WELCOME_BUTTON)
+
+    dp.message.register(back_to_welcome_handler, F.text == CLOSE_WISHLIST_BUTTON, StateFilter(WishlistBrowser.browsing))
+    dp.message.register(back_to_welcome_handler, F.text == CLOSE_BOOKED_BUTTON,
+                        StateFilter(BookedItemsBrowser.browsing))
 
     dp.callback_query.register(all_wishlists_navigation_handler, StateFilter(AllWishlistsBrowser.choosing_owner))
     dp.callback_query.register(show_main_menu_callback, F.data == "info:go_to_main_menu")
     dp.callback_query.register(show_info_callback, F.data.startswith("info:"))
     dp.callback_query.register(wishlist_add_url_handler, F.data.startswith("wishlist_add_url:"))
-    dp.callback_query.register(tickets_callback_handler, F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))
+    dp.callback_query.register(tickets_callback_handler, F.data.startswith(
+        ("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))
 
     dp.message.register(menu_handler, F.text)
 
     logging.info("Handlers registered. Starting polling...")
     polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
     logging.info("Aiogram bot polling started")
-    try: yield
+    try:
+        yield
     finally:
-        await http_client.stop(); await kafka_producer.stop(); await kafka_consumer.stop()
-        logging.info("Shutting down polling..."); polling_task.cancel()
-        try: await polling_task
-        except asyncio.CancelledError: logging.info("Polling cancelled")
-        await bot.session.close(); logging.info("Shutdown complete")
+        await http_client.stop();
+        await kafka_producer.stop();
+        await kafka_consumer.stop()
+        logging.info("Shutting down polling...");
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            logging.info("Polling cancelled")
+        await bot.session.close();
+        logging.info("Shutdown complete")

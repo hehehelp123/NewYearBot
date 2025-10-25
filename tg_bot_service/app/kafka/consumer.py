@@ -7,7 +7,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
-from aiogram.types import BufferedInputFile, InlineKeyboardButton
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
 from aiogram.exceptions import TelegramBadRequest
@@ -17,16 +17,20 @@ from app.core.config import settings
 from app.services.storage_service import storage_service
 from app.middlewares.access_middleware import update_allowed_users
 
-from app.handlers.wishlist import build_wishlist_page
+from app.handlers.wishlist import build_wishlist_page, build_booked_item_page
 from app.bot.states import (
     WishlistBrowser,
     UserRemoval,
     AllWishlistsBrowser,
-    WishlistAddManual
+    WishlistAddManual,
+    BookedItemsBrowser
 )
 from app.bot.utils import escape_markdown
 
 logger = logging.getLogger(__name__)
+
+CLOSE_WISHLIST_BUTTON = "❌ Закрыть вишлист"
+CLOSE_BOOKED_BUTTON = "❌ Закрыть брони"
 
 
 class KafkaBotConsumer:
@@ -83,8 +87,9 @@ class KafkaBotConsumer:
                                        "wishlist.view.viewer_failed",
                                        "wishlist.view.all_failed",
                                        "wishlist.view.booked_items_failed"):
-                        await self.bot.send_message(msg.value["telegram_id"],
-                                                    f"❌ Ошибка просмотра: {msg.value.get('reason', 'N/A')}")
+                        if msg.value.get("telegram_id"):
+                            await self.bot.send_message(msg.value["telegram_id"],
+                                                        f"❌ Ошибка просмотра: {msg.value.get('reason', 'N/A')}")
                     elif msg.topic == "user.user.allowed":
                         user_id = msg.value.get("user_id")
                         if user_id: update_allowed_users(user_id, allow=True)
@@ -303,11 +308,14 @@ class KafkaBotConsumer:
             await self.bot.send_message(telegram_id, "Ошибка при подготовке вишлиста для отображения.")
             return
         try:
+            kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=CLOSE_WISHLIST_BUTTON)]], resize_keyboard=True)
             if markup:
                 await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode=None,
                                             disable_web_page_preview=False)
+                await self.bot.send_message(telegram_id, "Используйте кнопки выше для навигации.", reply_markup=kb)
             else:
                 await self.bot.send_message(telegram_id, text, parse_mode=None, disable_web_page_preview=False)
+                await self.bot.send_message(telegram_id, "Вишлист пуст или ошибка.", reply_markup=kb)
         except Exception as e:
             logger.error(f"Failed to send wishlist view message (plain text): {e}. Text: {text}")
             await self.bot.send_message(telegram_id, "Произошла ошибка при отображении вишлиста.")
@@ -339,23 +347,37 @@ class KafkaBotConsumer:
         if not telegram_id:
             logger.warning(f"No telegram_id in booked_items_view payload: {value}")
             return
+
+        ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
+
         if not booked_items:
             await self.bot.send_message(telegram_id, "Ты пока ничего не забронировал.")
+            await ctx.clear()
             return
 
-        response_text = "Ты забронировал следующие товары:\n\n"
-        for i, item in enumerate(booked_items):
-            owner_name = item.get("owner_name", "Неизвестно")
-            item_name = item.get("name", "Без названия")
-            item_url = item.get("item_url", "")
-            response_text += f"{i + 1}. *{item_name}* (у {owner_name})"
-            if item_url:
-                response_text += f"\n   {item_url}\n"
-            else:
-                response_text += "\n"
+        await ctx.set_state(BookedItemsBrowser.browsing)
+        await ctx.set_data({
+            "booked_items": booked_items,
+            "current_index": 0,
+            "viewer_user_id": telegram_id
+        })
 
         try:
-            await self.bot.send_message(telegram_id, response_text, parse_mode=None, disable_web_page_preview=False)
+            text, markup = await build_booked_item_page(ctx, telegram_id)
+        except Exception as build_e:
+            logger.error(f"Error building booked item page: {build_e}", exc_info=True)
+            await self.bot.send_message(telegram_id, "Ошибка при подготовке списка броней.")
+            return
+
+        try:
+            kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=CLOSE_BOOKED_BUTTON)]], resize_keyboard=True)
+            if markup:
+                await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode=None,
+                                            disable_web_page_preview=False)
+                await self.bot.send_message(telegram_id, "Используйте кнопки выше для навигации.", reply_markup=kb)
+            else:
+                await self.bot.send_message(telegram_id, text, parse_mode=None, disable_web_page_preview=False)
+                await self.bot.send_message(telegram_id, "Список броней пуст или ошибка.", reply_markup=kb)
         except Exception as e:
-            logger.error(f"Failed to send booked items list: {e}")
+            logger.error(f"Failed to send booked items list: {e}. Text: {text}")
             await self.bot.send_message(telegram_id, "Ошибка при отображении списка забронированных товаров.")
