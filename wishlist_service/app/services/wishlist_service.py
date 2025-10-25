@@ -12,7 +12,9 @@ from app.schemas.wishlist_schemas import (
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
-
+from sqlalchemy.orm import joinedload
+from app.models.wishlist_models import ItemBooking, WishlistItem, Wishlist
+from app.schemas.wishlist_schemas import WishlistForViewer, WishlistItemForViewer
 logger = logging.getLogger(__name__)
 
 
@@ -288,6 +290,42 @@ class WishlistService:
                 "telegram_id": requester_user_id,
                 "reason": f"Internal serialization error: {e}"
             })
+
+    async def get_and_push_booked_items_for_user(self, requester_user_id: int):
+        """
+        Fetches all items booked by a specific user and sends them to the bot
+        using the *existing* viewer_success topic and schema.
+        """
+        logger.debug(f"Fetching booked items for user {requester_user_id}")
+        
+        
+        query = (
+            select(WishlistItem)
+            .join(ItemBooking, WishlistItem.item_id == ItemBooking.item_id)
+            .where(ItemBooking.booked_by_user_id == requester_user_id)
+            .options(
+                selectinload(WishlistItem.booking),
+                selectinload(WishlistItem.wishlist)
+            )
+            .order_by(ItemBooking.booked_at.desc())
+        )
+        
+        result = await self.db_session.execute(query)
+        db_items = result.scalars().all()
+        viewer_items = [WishlistItemForViewer.model_validate(item) for item in db_items]
+        viewer_schema = WishlistForViewer(
+            owner_user_id=0, # Dummy ID
+            name="My Booked Items",
+            wishlist_id=0,   # Dummy ID
+            items=viewer_items
+        )
+        
+        viewer_payload = viewer_schema.model_dump(mode="json")
+        viewer_payload["telegram_id"] = requester_user_id
+        await kafka_producer.send("wishlist.view.viewer_success", viewer_payload)
+        
+        logger.info(f"Sent booked items list (count: {len(viewer_items)}) to user {requester_user_id} "
+                    f"on topic 'wishlist.view.viewer_success'")
 
 
     async def get_wishlist_by_owner_name(self, owner_user_name: str) -> Wishlist | None:

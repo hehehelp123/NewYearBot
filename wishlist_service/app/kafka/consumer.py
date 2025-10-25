@@ -123,6 +123,16 @@ async def handle_wishlist_get_viewer(event_data: dict):
     except Exception as e:
         logger.error(f"Error processing get_viewer event: {e}", exc_info=True)
 
+async def handle_wishlist_get_booked(event_data: dict):
+    try:
+        requester_user_id = event_data["telegram_id"]
+        async with AsyncSessionLocal() as session:
+            service = WishlistService(session)
+            await service.get_and_push_booked_items_for_user(requester_user_id)
+        logger.info(f"Task to get booked items for user {requester_user_id} processed.")
+    except Exception as e:
+        logger.error(f"Error processing get_booked event: {e}", exc_info=True)
+
 
 class KafkaConsumer:
     def __init__(self, *topics: str):
@@ -168,6 +178,8 @@ class KafkaConsumer:
                     await handle_wishlist_delete_event(msg.value)
                 elif msg.topic == "wishlist.view.viewer":
                     await handle_wishlist_get_viewer(msg.value)
+                elif msg.topic == "wishlist.view.booked_items":
+                    await handle_wishlist_get_booked(msg.value)
         except asyncio.CancelledError:
             logger.info("Задача консумера отменена.")
         finally:
