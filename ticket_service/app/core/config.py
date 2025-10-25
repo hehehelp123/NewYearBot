@@ -9,9 +9,6 @@ class Settings(BaseSettings):
     MINIO_ROOT_PASSWORD: str
     MINIO_BUCKET: str
 
-    KAFKA_CONNECT_RETRIES: int = 15
-    KAFKA_CONNECT_RETRY_DELAY: int = 3
-
     ADMIN_TELEGRAM_IDS: list[int] = []
 
 

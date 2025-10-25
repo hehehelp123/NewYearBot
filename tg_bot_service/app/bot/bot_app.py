@@ -67,14 +67,6 @@ WELCOME_TEXT = (
     "С наступающим!"
 )
 
-TOPICS_AWAITING_KAFKA_RESPONSE = (
-    "user.user.list_request",
-    "ticket.list.request",
-    "wishlist.view.owner",
-    "wishlist.view.viewer",
-    "music.sync.request"
-)
-
 
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str): return ""
@@ -302,36 +294,21 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
     if not fields:
         collected_data = {"admin_id": message.from_user.id}
         kafka_topic = action.get("kafka_topic")
-
-        if kafka_topic in TOPICS_AWAITING_KAFKA_RESPONSE:
-            wait_message = "Запрашиваю..."
-            collected_data["telegram_id"] = message.from_user.id
-
-            if kafka_topic == "user.user.list_request":
-                wait_message = "Запрашиваю список..."
-                del collected_data["telegram_id"]
-            elif kafka_topic == "ticket.list.request":
-                wait_message = "Ищу билеты..."
-            elif "wishlist.view" in kafka_topic:
-                wait_message = "Ищу вишлист..."
-            elif "music.sync" in kafka_topic:
-                wait_message = "Запускаю синхронизацию..."
-
-            await message.answer(wait_message)
+        if kafka_topic == "user.user.list_request":
+            await message.answer("Запрашиваю список...")
             try:
                 await kafka_producer.send(kafka_topic, collected_data)
-                logger.info(f"Action {kafka_topic} sent (awaiting response)")
+                logger.info(f"Action {kafka_topic} sent")
             except Exception as e:
                 logger.error(f"Kafka error: {e}", exc_info=True)
                 await message.answer(f"Ошибка: {e}")
-
         else:
             collected_data["telegram_id"] = message.from_user.id
             await message.answer("Ля, погодь...")
             try:
                 if not kafka_topic: raise ValueError("No kafka_topic")
                 await kafka_producer.send(kafka_topic, collected_data)
-                logger.info(f"Action {kafka_topic} sent (no response awaited)")
+                logger.info(f"Action {kafka_topic} sent")
             except Exception as e:
                 logger.error(f"Kafka error: {e}", exc_info=True)
                 await message.answer(f"Ошибка: {e}")
@@ -368,12 +345,8 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
         file_info = await bot.get_file(doc.file_id)
         file_bytes = await bot.download_file(file_info.file_path)
         try:
-            folder = "tickets"
-            if "music" in action.get("kafka_topic", ""):
-                folder = "music"
-
-            input_value = storage_service.upload_file(file_bytes.read(), doc.file_name, folder=folder,
-                                                      content_type=doc.mime_type or "application/octet-stream")
+            input_value = storage_service.upload_file(file_bytes.read(), doc.file_name, folder="tickets",
+                                                      content_type=doc.mime_type or "application/pdf")
             await message.answer("Национализирован.")
             logger.info(f"Uploaded {input_value}")
         except Exception as e:
