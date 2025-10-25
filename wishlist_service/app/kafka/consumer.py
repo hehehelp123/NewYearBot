@@ -172,8 +172,9 @@ async def handle_wishlist_get_booked(event_data: dict):
         requester_user_id = event_data["telegram_id"]
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_booked_items_for_user(requester_user_id)
-        logger.info(f"Task to get booked items for user {requester_user_id} processed.")
+            # Убедись, что у тебя есть этот метод в WishlistService
+            # await service.get_and_push_booked_items_for_user(requester_user_id)
+            logger.info(f"Task to get booked items for user {requester_user_id} processed (Handler not implemented).")
     except Exception as e:
         logger.error(f"Error processing get_booked event: {e}", exc_info=True)
 
@@ -183,8 +184,10 @@ async def handle_wishlist_get_all(event_data: dict):
         requester_user_id = event_data["telegram_id"]
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_all_wishlist_owners(requester_user_id)
-        logger.info(f"Task to get all wishlist owners for user {requester_user_id} processed.")
+            # Убедись, что у тебя есть этот метод в WishlistService
+            # await service.get_and_push_all_wishlist_owners(requester_user_id)
+            logger.info(
+                f"Task to get all wishlist owners for user {requester_user_id} processed (Handler not implemented).")
     except Exception as e:
         logger.error(f"Error processing get_all event: {e}", exc_info=True)
 

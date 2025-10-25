@@ -10,13 +10,20 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import BufferedInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiokafka import AIOKafkaConsumer
-from app.bot.bot_app import build_wishlist_page, WishlistBrowser, UserRemoval, AllWishlistsBrowser, WishlistAddManual
-from app.middlewares.access_middleware import update_allowed_users
 
+from app.middlewares.access_middleware import update_allowed_users
 from app.core.config import settings
 from app.services.storage_service import storage_service
-from app.bot.bot_app import build_wishlist_page, WishlistBrowser, UserRemoval
 from app.middlewares.access_middleware import update_allowed_users
+
+from app.handlers.wishlist import build_wishlist_page
+from app.bot.states import (
+    WishlistBrowser,
+    UserRemoval,
+    AllWishlistsBrowser,
+    WishlistAddManual
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +82,8 @@ class KafkaBotConsumer:
                     elif msg.topic == "notification.send.tickets":
                         await self._handle_tickets_list(msg.value)
                     elif msg.topic == "wishlist.view.viewer_success":
+                        await self._handle_wishlist_view(msg.value)
+                    elif msg.topic == "wishlist.view.owner_success":
                         await self._handle_wishlist_view(msg.value)
                     elif msg.topic in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
                         await self.bot.send_message(msg.value["telegram_id"],
