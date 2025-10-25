@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload
 from app.models.ticket_models import Ticket
-from app.utils.ticket_parser import TicketPDFParser
+from app.utils.ticket_parser import parse_rzd_ticket
 from app.schemas.ticket_schemas import TicketCreate
 from typing import List, Optional
 
@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class TicketService:
-    def __init__(self):
-        self.pdf_parser = TicketPDFParser()
 
     async def create_ticket(
             self,
@@ -25,7 +23,12 @@ class TicketService:
     ) -> Ticket:
         logger.info(f"Parsing ticket data from {temp_file_path}")
 
-        parsed_data = self.pdf_parser.parse_pdf(temp_file_path)
+        parsed_data = {}
+        try:
+            with open(temp_file_path, "rb") as f_in:
+                parsed_data = parse_rzd_ticket(f_in)
+        except Exception as e:
+            logger.error(f"Failed to parse PDF {temp_file_path}: {e}", exc_info=True)
 
         ticket_data = TicketCreate(
             title=title,
