@@ -8,7 +8,6 @@ from app.kafka.producer import kafka_producer
 from app.kafka.consumer import kafka_consumer
 from app.core.config import settings
 from app.api.v1 import routers as v1_routers
-from app.core.db import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,8 +16,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application lifespan startup...")
-
-    await init_db()
 
     kafka_ready = False
     for i in range(settings.KAFKA_CONNECT_RETRIES):
