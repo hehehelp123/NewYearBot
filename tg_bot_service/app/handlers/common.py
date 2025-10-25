@@ -1,6 +1,7 @@
 import logging
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.core.config import settings
 from app.kafka.producer import kafka_producer
