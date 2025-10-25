@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload
 from app.models.ticket_models import Ticket
-from app.utils.ticket_parser import parse_rzd_ticket
+from app.services.pdf_parser import parse_rzd_ticket
 from app.schemas.ticket_schemas import TicketCreate
 from typing import List, Optional
 
