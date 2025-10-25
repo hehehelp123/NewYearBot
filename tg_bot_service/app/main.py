@@ -1,9 +1,15 @@
-from contextlib import asynccontextmanager
+import logging
 from fastapi import FastAPI
-from app.api.v1.routers import router
-from app.core.http_client import http_client
-from app.bot.bot_startup import lifespan
+from app.bot_startup import lifespan
 
-app = FastAPI(title="Telegram Bot Service", lifespan=lifespan)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-app.include_router(router, prefix="/api/v1")
+app = FastAPI(
+    title="Telegram Bot Service",
+    lifespan=lifespan
+)
+
+@app.get("/")
+def read_root():
+    return {"service": "Telegram Bot Service", "status": "ok"}

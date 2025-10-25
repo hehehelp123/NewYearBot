@@ -15,26 +15,22 @@ def get_wishlist_service_features():
             "type": "menu",
             "items": [
                 {
-                    "name": "Добавить в вишлист",
+                    "name": "Добавить по ссылке",
                     "type": "action",
                     "kafka_topic": "wishlist.wishlist.add",
                     "payload": {
-                        "source_url": {"type": "string", "description": "Ссылка на товар ozon/wildberries/aliexpress/yandex market"}
+                        "source_text": {"type": "string", "description": "Текст, содержащий ссылку на товар (ozon/wb/ali/ya)"}
                     },
                 },
                 {
-                    "name": "Просмотреть вишлист пользователя",
+                    "name": "Добавить (руками)",
                     "type": "action",
                     "unfinished": True,
-                    "kafka_topic": "wishlist.view.viewer",
-                    "payload": {
-                        "target_user": {"type": "string", "description": "Введите тэг пользователя"}
-                    },
+                    "kafka_topic": "wishlist.item.add_manual_start",
                 },
                 {
                     "name": "Просмотреть забронированные товары",
                     "type": "action",
-                    "unfinished": True,
                     "kafka_topic": "wishlist.view.booked_items",
                 },
                 {
@@ -57,12 +53,21 @@ async def create_wishlist(wishlist: WishlistCreate, db: AsyncSession = Depends(g
     wishlist_service = WishlistService(db)
     try:
         new_wishlist = await wishlist_service.create_wishlist(wishlist)
-        return new_wishlist
+        if new_wishlist:
+            return WishlistForOwner.model_validate(new_wishlist)
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Wishlist already exists or failed to fetch after creation")
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database integrity error."
         )
+    except Exception as e:
+         raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {e}"
+        )
+
 
 @router.get("/wishlists/{wishlist_id}")
 async def get_wishlist(wishlist_id: int, viewer_user_id: int, db: AsyncSession = Depends(get_db)):

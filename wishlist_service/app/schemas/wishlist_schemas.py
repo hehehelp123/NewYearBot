@@ -2,8 +2,17 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
 class WishlistAddRequest(BaseModel):
-    source_url: HttpUrl
+    source_text: str
     telegram_id: int
+    is_infinitely_bookable: bool = False
+
+class ItemManualAddRequest(BaseModel):
+    telegram_id: int
+    name: str
+    item_url: str | None = None
+    cost: str | None = None
+    delivery_date: str | None = None
+    is_infinitely_bookable: bool = False
 
 class ItemBookingInfo(BaseModel):
     booked_by_user_id: int
@@ -29,15 +38,16 @@ class WishlistItemBase(BaseModel):
     delivery_date: str | None = None
 
 class WishlistItemCreate(WishlistItemBase):
-    pass
+    is_infinitely_bookable: bool = False
 
 class WishlistItemForOwner(WishlistItemBase):
     item_id: int
     added_at: datetime
+    is_infinitely_bookable: bool
     model_config = ConfigDict(from_attributes=True)
 
 class WishlistItemForViewer(WishlistItemForOwner):
-    booking: ItemBookingInfo | None = None
+    bookings: list[ItemBookingInfo] = []
 
 class WishlistBase(BaseModel):
     owner_user_id: int
@@ -54,8 +64,4 @@ class WishlistForOwner(WishlistBase):
 class WishlistForViewer(WishlistBase):
     wishlist_id: int
     items: list[WishlistItemForViewer] = []
-    model_config = ConfigDict(from_attributes=True)
-    
-class WishlistOwnerList(BaseModel):
-    owner_user_ids: list[int]
     model_config = ConfigDict(from_attributes=True)

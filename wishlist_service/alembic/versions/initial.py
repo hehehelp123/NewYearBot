@@ -32,6 +32,7 @@ def upgrade() -> None:
     sa.Column('cost', sa.String(), nullable=True),
     sa.Column('delivery_date', sa.String(), nullable=True),
     sa.Column('added_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('is_infinitely_bookable', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.ForeignKeyConstraint(['wishlist_id'], ['wishlists.wishlist_id'], ),
     sa.PrimaryKeyConstraint('item_id')
     )
@@ -41,8 +42,7 @@ def upgrade() -> None:
     sa.Column('booked_by_user_id', sa.Integer(), nullable=False),
     sa.Column('booked_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['item_id'], ['wishlist_items.item_id'], ),
-    sa.PrimaryKeyConstraint('booking_id'),
-    sa.UniqueConstraint('item_id')
+    sa.PrimaryKeyConstraint('booking_id')
     )
 
 
