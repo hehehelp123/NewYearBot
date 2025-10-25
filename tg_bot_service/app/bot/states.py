@@ -27,3 +27,6 @@ class AlbumBrowser(StatesGroup):
 class UserRemoval(StatesGroup):
     choosing_user = State()
     confirming_delete = State()
+
+class BookedItemsBrowser(StatesGroup):
+    browsing = State()
