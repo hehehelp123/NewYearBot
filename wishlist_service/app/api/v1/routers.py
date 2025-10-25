@@ -15,12 +15,18 @@ def get_wishlist_service_features():
             "type": "menu",
             "items": [
                 {
-                    "name": "Добавить в вишлист",
+                    "name": "Добавить по ссылке",
                     "type": "action",
                     "kafka_topic": "wishlist.wishlist.add",
                     "payload": {
                         "source_text": {"type": "string", "description": "Текст, содержащий ссылку на товар (ozon/wb/ali/ya)"}
                     },
+                },
+                {
+                    "name": "Добавить (руками)",
+                    "type": "action",
+                    "unfinished": True,
+                    "kafka_topic": "wishlist.item.add_manual_start",
                 },
                 {
                     "name": "Просмотреть вишлист пользователя",

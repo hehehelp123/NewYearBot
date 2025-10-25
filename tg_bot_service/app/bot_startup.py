@@ -12,21 +12,37 @@ from app.core.http_client import http_client
 from app.kafka.consumer import KafkaBotConsumer
 from app.kafka.producer import kafka_producer
 from app.middlewares.access_middleware import AccessMiddleware
-from app.bot.bot_app import (
+
+from app.bot.constants import (
     START_BUTTON, BACK_TO_WELCOME_BUTTON, UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON,
-    STOP_UPLOAD_BUTTON, ADMIN_ADD_USER_BUTTON, ADD_WISHLIST_ITEM_MANUALLY_BUTTON,
-    ActionForm, AllWishlistsBrowser, WishlistBrowser, MediaUpload, AlbumBrowser, UserRemoval, WishlistAddManual,
-    all_wishlists_navigation_handler,
-    callback_query_handler, menu_handler, process_action_field, start_button_handler,
-    start_handler, wishlist_navigation_handler, show_main_menu_callback, show_info_callback,
-    back_to_welcome_handler, start_media_upload_handler, stop_media_upload_handler,
-    process_media_year_handler, media_upload_handler, start_album_view_handler,
-    album_navigation_handler,
-    handle_remove_user_confirm, handle_remove_user_delete, handle_remove_user_cancel,
-    wishlist_add_url_handler,
-    process_manual_wishlist_name, process_manual_wishlist_cost, process_manual_wishlist_url,
+    STOP_UPLOAD_BUTTON
+)
+from app.bot.states import (
+    ActionForm, AllWishlistsBrowser, WishlistBrowser, MediaUpload, AlbumBrowser,
+    UserRemoval, WishlistAddManual
+)
+
+from app.handlers.common import (
+    start_button_handler, start_handler, back_to_welcome_handler,
+    show_main_menu_callback, show_info_callback
+)
+from app.handlers.menu import menu_handler, process_action_field
+from app.handlers.media import (
+    start_media_upload_handler, stop_media_upload_handler,
+    process_media_year_handler, media_upload_handler
+)
+from app.handlers.albums import start_album_view_handler, album_navigation_handler
+from app.handlers.admin import (
+    handle_remove_user_confirm, handle_remove_user_delete, handle_remove_user_cancel
+)
+from app.handlers.tickets import tickets_callback_handler
+from app.handlers.wishlist import (
+    all_wishlists_navigation_handler, wishlist_navigation_handler,
+    wishlist_add_url_handler, process_manual_wishlist_name,
+    process_manual_wishlist_cost, process_manual_wishlist_url,
     process_manual_wishlist_delivery, process_manual_wishlist_confirm
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -78,14 +94,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     dp.message.register(start_handler, F.text == "/start")
     dp.message.register(back_to_welcome_handler, F.text == BACK_TO_WELCOME_BUTTON)
-    dp.message.register(start_media_upload_handler, F.text == UPLOAD_MEDIA_BUTTON)
-    dp.message.register(start_album_view_handler, F.text == VIEW_ALBUMS_BUTTON)
 
     dp.callback_query.register(all_wishlists_navigation_handler, StateFilter(AllWishlistsBrowser.choosing_owner))
     dp.callback_query.register(show_main_menu_callback, F.data == "info:go_to_main_menu")
     dp.callback_query.register(show_info_callback, F.data.startswith("info:"))
     dp.callback_query.register(wishlist_add_url_handler, F.data.startswith("wishlist_add_url:"))
-    dp.callback_query.register(callback_query_handler, F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))
+    dp.callback_query.register(tickets_callback_handler, F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))
 
     dp.message.register(menu_handler, F.text)
 
