@@ -330,6 +330,7 @@ class WishlistService:
             })
             return
 
+        # Владелец не должен видеть бронирования
         try:
             owner_schema = WishlistForOwner.model_validate(wishlist)
             owner_payload = owner_schema.model_dump(mode="json")
@@ -356,6 +357,7 @@ class WishlistService:
             })
             return
 
+        # Зритель видит бронирования
         try:
             viewer_schema = WishlistForViewer.model_validate(wishlist)
             viewer_payload = viewer_schema.model_dump(mode="json")

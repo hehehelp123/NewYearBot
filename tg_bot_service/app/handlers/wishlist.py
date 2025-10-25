@@ -8,6 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.kafka.producer import kafka_producer
 from app.bot.states import WishlistAddManual
 from app.bot.utils import escape_markdown, reset_to_main_menu
+from app.bot.keyboards import build_menu_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -124,22 +125,27 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
 
     item = items[current_index]
 
-    item_price = escape_markdown(str(item.get("cost", "N/A")))
-    item_delivery = escape_markdown(str(item.get("delivery_date", "N/A")))
-    item_name = escape_markdown(str(item.get("name", "N/A")))
-    raw_url = item.get("item_url")
-    escaped_url_text = escape_markdown(str(raw_url if raw_url else "N/A"))
-    item_url_markdown = f"[Link]({escape_markdown(str(raw_url))})" if raw_url else escaped_url_text
+    item_price_raw = str(item.get("cost", "N/A"))
+    item_delivery_raw = str(item.get("delivery_date", "N/A"))
+    item_name_raw = str(item.get("name", "N/A"))
+    item_url_raw = item.get("item_url")
+
+    item_price = escape_markdown(item_price_raw)
+    item_delivery = escape_markdown(item_delivery_raw)
+    item_name = escape_markdown(item_name_raw)
+
+    # Экранируем URL для вставки в Markdown ссылку
+    item_url_markdown = "N/A"
+    if item_url_raw:
+        # Экранируем символы, которые могут сломать Markdown V2 *внутри* URL
+        escaped_url_for_markdown = item_url_raw.replace('(', '\\(').replace(')', '\\)').replace('-', '\\-')
+        item_url_markdown = f"[Link]({escaped_url_for_markdown})"
 
     is_infinitely_bookable = item.get("is_infinitely_bookable", False)
     bookings = item.get("bookings", [])
 
     text = f"*Товар {current_index + 1}/{len(items)}*\n\n*Название:* {item_name}\n"
-
-    if raw_url:
-        text += f"*URL:* {item_url_markdown}\n"
-    else:
-        text += f"*URL:* {escaped_url_text}\n"
+    text += f"*URL:* {item_url_markdown}\n"
 
     is_owner = (owner_user_id == viewer_user_id)
     text += f"*Цена:* {item_price}\n*Доставка:* {item_delivery}\n"
@@ -164,7 +170,7 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     if is_owner:
         text += f"\n*Статус:* ✅ Ваш товар\\. Доступен для приватизации\n"
         if bookings:
-            text += f"*Забронено:* {len(bookings)} раз\n"
+            text += f"*Забронено:* {len(bookings)} раз\n"  # Владелец может видеть КОЛИЧЕСТВО броней, но не КЕМ
         builder.button(text="🗑️ Отдать африканским детям", callback_data=f"wishlist_delete:{item_id}")
     elif my_booking:
         text += f"\n*Статус:* 🎁 Задание принято, будут кары если не выполните\\!\n"
@@ -172,8 +178,8 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
             text += f"*Также забронено:* {len(bookings) - 1} другими\n"
         builder.button(text="🎁 Молить об отмене", callback_data=f"wishlist_unbook:{item_id}")
     elif not is_infinitely_bookable and bookings:
-        booker_id = bookings[0].get("booked_by_user_id", "кто\\-то")  # Экранируем дефис
-        text += f"\n*Статус:* ⛔️ Захвачено {booker_id}\n"
+        # booker_id = bookings[0].get("booked_by_user_id", "кто\\-то") # Зритель не должен видеть ID другого
+        text += f"\n*Статус:* ⛔️ Захвачено кем\\-то другим\n"  # Убрали ID
         builder.button(text="⛔️ Захвачен", callback_data="wishlist_noop")
     else:
         text += f"\n*Статус:* ✅ Доступен для захвата\n"
