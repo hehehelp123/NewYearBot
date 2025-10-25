@@ -19,11 +19,27 @@ logger = logging.getLogger(__name__)
 
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str): return ""
-    # Более агрессивное экранирование для MarkdownV2
-    escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
-    # Экранируем сначала бэкслеш, потом остальные символы
+    escape_chars = r"_*[]()~`>#+-=|{}.!"  # Убрал \ из списка, т.к. экранируем его отдельно
     text = text.replace('\\', '\\\\')
-    return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
+    text = text.replace('_', '\\_')
+    text = text.replace('*', '\\*')
+    text = text.replace('[', '\\[')
+    text = text.replace(']', '\\]')
+    text = text.replace('(', '\\(')
+    text = text.replace(')', '\\)')
+    text = text.replace('~', '\\~')
+    text = text.replace('`', '\\`')
+    text = text.replace('>', '\\>')
+    text = text.replace('#', '\\#')
+    text = text.replace('+', '\\+')
+    text = text.replace('-', '\\-')
+    text = text.replace('=', '\\=')
+    text = text.replace('|', '\\|')
+    text = text.replace('{', '\\{')
+    text = text.replace('}', '\\}')
+    text = text.replace('.', '\\.')
+    text = text.replace('!', '\\!')
+    return text
 
 
 def get_current_new_year() -> Optional[int]:

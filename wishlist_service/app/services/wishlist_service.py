@@ -54,7 +54,6 @@ class WishlistService:
 
     async def create_wishlist(self, wishlist: WishlistCreate) -> Wishlist | None:
         logger.info(f"Attempting to create wishlist for user_id: {wishlist.owner_user_id}")
-
         existing_wishlist = await self.get_wishlist_by_owner_id(wishlist.owner_user_id)
         if existing_wishlist:
             logger.warning(f"Wishlist already exists for user_id: {wishlist.owner_user_id}")
@@ -102,7 +101,7 @@ class WishlistService:
         try:
             item_data = WishlistItemCreate(
                 name=downloaded_data['name'],
-                item_url=downloaded_data.get('image_url', source_url),
+                item_url=source_url,
                 cost=downloaded_data.get('cost'),
                 delivery_date=downloaded_data.get('delivery_date'),
                 is_infinitely_bookable=is_infinitely_bookable
@@ -330,7 +329,6 @@ class WishlistService:
             })
             return
 
-        # Владелец не должен видеть бронирования
         try:
             owner_schema = WishlistForOwner.model_validate(wishlist)
             owner_payload = owner_schema.model_dump(mode="json")
@@ -357,7 +355,6 @@ class WishlistService:
             })
             return
 
-        # Зритель видит бронирования
         try:
             viewer_schema = WishlistForViewer.model_validate(wishlist)
             viewer_payload = viewer_schema.model_dump(mode="json")

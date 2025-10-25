@@ -1,18 +1,17 @@
 import logging
 from datetime import datetime
+# --- ДОБАВЛЕННЫЙ ИМПОРТ ---
+import re
+# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 from aiogram import Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-# --- ДОБАВЛЕННЫЙ ИМПОРТ ---
 from aiogram.exceptions import TelegramBadRequest
-# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 from app.kafka.producer import kafka_producer
 from app.bot.states import WishlistAddManual
-# --- ИЗМЕНЕНИЯ: импортируем escape_markdown из utils ---
 from app.bot.utils import escape_markdown, reset_to_main_menu
-# --- КОНЕЦ ИЗМЕНЕНИЙ ---
 from app.bot.keyboards import build_menu_keyboard
 
 logger = logging.getLogger(__name__)
@@ -76,7 +75,7 @@ async def process_manual_wishlist_url(message: Message, state: FSMContext):
 
     item = data.get("manual_add_data", {})
     text = f"Проверь:\n"
-    text += f"Название: {escape_markdown(item.get('name', 'N/A'))}\n"  # Экранируем для простого текста
+    text += f"Название: {escape_markdown(item.get('name', 'N/A'))}\n"
     text += f"Цена: {escape_markdown(item.get('cost', 'N/A'))}\n"
     text += f"URL: {escape_markdown(item.get('item_url', 'N/A'))}\n"
 
@@ -84,7 +83,6 @@ async def process_manual_wishlist_url(message: Message, state: FSMContext):
     builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_manual_confirm:single")
     builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_manual_confirm:infinite")
     builder.button(text="❌ Отмена", callback_data="wishlist_manual_confirm:cancel")
-    # Используем parse_mode=None для простого текста подтверждения
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode=None)
 
 
@@ -311,28 +309,30 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         await query.answer()
         return
 
-    # Навигация (prev/next)
     try:
         text, markup = await build_wishlist_page(state, query.from_user.id)
         if text and markup:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
-                                          disable_web_page_preview=True)
+            await query.message.answer(text, reply_markup=markup, parse_mode="MarkdownV2",
+                                       disable_web_page_preview=True)
+            await query.message.delete()
         elif text:
-            await query.message.edit_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            await query.message.answer(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            await query.message.delete()
     except TelegramBadRequest as e:
-        logger.error(f"Failed to edit message on navigation (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
+        logger.error(f"Failed to send message on navigation (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
         try:
             plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
             plain_text = plain_text.replace('*', '').replace('_', '')
             if markup:
-                await query.message.edit_text(plain_text, reply_markup=markup, disable_web_page_preview=True)
+                await query.message.answer(plain_text, reply_markup=markup, disable_web_page_preview=True)
             else:
-                await query.message.edit_text(plain_text, disable_web_page_preview=True)
+                await query.message.answer(plain_text, disable_web_page_preview=True)
+            await query.message.delete()
         except Exception as plain_e:
-            logger.error(f"Failed to edit message on navigation even as plain text: {plain_e}")
+            logger.error(f"Failed to send message on navigation even as plain text: {plain_e}")
             await query.message.answer(f"Ошибка отображения: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error editing message on navigation: {e}", exc_info=True)
+        logger.error(f"Unexpected error sending message on navigation: {e}", exc_info=True)
         await query.message.answer(f"Неожиданная ошибка отображения: {e}")
 
 

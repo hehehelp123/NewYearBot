@@ -182,23 +182,25 @@ async def handle_wishlist_delete_event(event_data: dict):
 
 async def handle_wishlist_get_owner(event_data: dict):
     try:
-        request = WishlistGetRequest(
-            owner_user_id=event_data.get("owner_user_id"),  # Owner ID is needed here
-            requester_user_id=event_data["telegram_id"]
-        )
-        if not request.owner_user_id:
-            raise ValueError("'owner_user_id' not found in event data for get_owner")
+        # Pydantic schema expects owner_user_name but we should use owner_user_id
+        owner_id = event_data.get("owner_user_id")
+        if not owner_id and event_data.get("telegram_id"):  # Fallback for viewing own wishlist
+            owner_id = event_data["telegram_id"]
+
+        if not owner_id:
+            raise ValueError("'owner_user_id' or 'telegram_id' not found in event data for get_owner")
+
+        requester_id = event_data["telegram_id"]
 
         async with AsyncSessionLocal() as session:
             service = WishlistService(session)
-            await service.get_and_push_wishlist_for_owner(request.owner_user_id, request.requester_user_id)
-        logger.info(
-            f"Task to get owner view for {request.owner_user_id} (requested by {request.requester_user_id}) processed.")
+            await service.get_and_push_wishlist_for_owner(owner_id, requester_id)
+        logger.info(f"Task to get owner view for {owner_id} (requested by {requester_id}) processed.")
     except Exception as e:
         logger.error(f"Error processing get_owner event: {e}", exc_info=True)
         try:
             await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_id": event_data.get("owner_user_id", "unknown"),
+                "owner_user_id": event_data.get("owner_user_id", event_data.get("telegram_id", "unknown")),
                 "telegram_id": event_data.get("telegram_id", "unknown"),
                 "reason": f"Internal error processing get_owner: {e}"
             })
