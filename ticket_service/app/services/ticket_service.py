@@ -33,7 +33,7 @@ class TicketService:
         ticket_data = TicketCreate(
             title=title,
             storage_key=storage_key,
-            user_id=user_id,
+            requester_user_id=user_id,
             departure_station=parsed_data.get("departure_station"),
             arrival_station=parsed_data.get("arrival_station"),
             departure_datetime=parsed_data.get("departure_datetime"),
@@ -52,7 +52,7 @@ class TicketService:
         logger.info(f"Fetching tickets for user {user_id}")
         stmt = (
             select(Ticket)
-            .where(Ticket.user_id == user_id)
+            .where(Ticket.requester_user_id == user_id)
             .order_by(Ticket.departure_datetime.desc())
         )
         result = await db.scalars(stmt)
@@ -64,7 +64,7 @@ class TicketService:
         logger.info(f"Fetching ticket {ticket_id} for user {user_id}")
         stmt = (
             select(Ticket)
-            .where(Ticket.id == ticket_id, Ticket.user_id == user_id)
+            .where(Ticket.ticket_id == ticket_id, Ticket.requester_user_id == user_id)
         )
         result = await db.scalars(stmt)
         ticket = result.first()
@@ -79,6 +79,5 @@ class TicketService:
         await db.delete(ticket)
         await db.flush()
         logger.info(f"Ticket {ticket.id} deleted from DB")
-
 
 ticket_service = TicketService()
