@@ -115,7 +115,7 @@ class KafkaBotConsumer:
             await self.bot.send_message(telegram_id, f"Не скачал {filename}.")
 
     async def _handle_send_tickets(self, value: dict):
-        chat_id=value.get("telegram_id")
+        chat_id=value.get("chat_id")
         tickets=value.get("tickets", [])
 
         if not chat_id:
