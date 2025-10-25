@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application lifespan startup...")
 
     kafka_ready = False
-    for i in range(settings.KAFTKA_CONNECT_RETRIES):
+    for i in range(settings.KAFKA_CONNECT_RETRIES):
         try:
             await kafka_producer.start()
             logger.info("KafkaProducer started.")
