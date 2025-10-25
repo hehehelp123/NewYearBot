@@ -11,6 +11,9 @@ from app.bot.states import ActionForm, WishlistAddManual
 from app.bot.utils import load_schema, find_item_by_name, reset_to_main_menu
 from app.bot.keyboards import build_menu_keyboard
 from app.bot.constants import UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON
+from app.core.config import settings
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         return
 
     if selected.get("type") == "menu":
-        is_admin = user_id in settings.ADMIN_TELEGRAM_IDS
+        is_admin = user_id in settings.ADMIN_TELEGRAM_IDS  # Теперь settings доступен
         sub_items = selected.get("items") or []
         sub_names = [i.get("name") for i in sub_items if
                      isinstance(i, Dict) and isinstance(i.get("name"), str) and (not i.get("admin_only") or is_admin)]
