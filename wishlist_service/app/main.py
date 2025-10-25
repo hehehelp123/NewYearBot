@@ -23,18 +23,15 @@ consumer = KafkaConsumer(
     "wishlist.view.viewer",
     "wishlist.view.owner",
     "wishlist.item.delete",
-    "wishlist.item.add_manual"
+    "wishlist.item.add_manual",
+    "wishlist.view.all"
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Управляет жизненным циклом приложения с надежным запуском Kafka.
-    """
     logging.info("Application lifespan startup...")
-
     retry_interval = 2
     max_retries = 15
     for i in range(max_retries):
@@ -44,7 +41,7 @@ async def lifespan(app: FastAPI):
             await consumer.start()
             logger.info("Scheduling background task for cookie export.")
             asyncio.create_task(selenium_downloader.run_cookie_export_background())
-            logging.info("✅ Kafka producer started successfully.")
+            logging.info("✅ Kafka producer and consumer started successfully.")
             break
         except KafkaConnectionError as e:
             if i + 1 == max_retries:
@@ -55,12 +52,17 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.sleep(retry_interval)
             retry_interval *= 1.5
+        except Exception as e:
+             logger.error(f"❌ An unexpected error occurred during Kafka startup: {e}. Exiting.", exc_info=True)
+             raise
+
 
     yield
 
     logging.info("Application lifespan shutdown...")
     await kafka_producer.stop()
-    logging.info("Kafka producer stopped.")
+    await consumer.stop()
+    logging.info("Kafka producer and consumer stopped.")
 
 
 app = FastAPI(
