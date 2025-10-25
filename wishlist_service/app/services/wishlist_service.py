@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import distinct
 from app.models.wishlist_models import Wishlist, WishlistItem, ItemBooking
 from app.schemas.wishlist_schemas import (
@@ -10,7 +10,9 @@ from app.schemas.wishlist_schemas import (
     WishlistForViewer,
     WishlistItemCreate,
     WishlistItemForOwner,
-    ItemManualAddRequest
+    ItemManualAddRequest,
+    WishlistItemForViewer,
+    ItemBookingInfo
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
@@ -338,4 +340,40 @@ class WishlistService:
             logger.error(f"Failed to get/push all wishlist owners: {e}", exc_info=True)
             await kafka_producer.send("wishlist.view.all_failed", {
                 "telegram_id": requester_user_id, "reason": f"Database or Kafka error: {e}"
+            })
+
+    async def get_and_push_booked_items_for_user(self, requester_user_id: int):
+        logger.info(f"Fetching booked items for user {requester_user_id}")
+        try:
+            query = (
+                select(WishlistItem)
+                .join(ItemBooking)
+                .where(ItemBooking.booked_by_user_id == requester_user_id)
+                .options(
+                    joinedload(WishlistItem.wishlist),
+                    selectinload(WishlistItem.bookings)
+                )
+            )
+            result = await self.db_session.execute(query)
+            booked_items = result.scalars().all()
+
+            items_payload = []
+            for item in booked_items:
+                item_schema = WishlistItemForViewer.model_validate(item)
+                item_dict = item_schema.model_dump(mode="json")
+                item_dict["owner_name"] = item.wishlist.name
+                items_payload.append(item_dict)
+
+            payload = {
+                "telegram_id": requester_user_id,
+                "booked_items": items_payload
+            }
+            await kafka_producer.send("wishlist.view.booked_items_success", payload)
+            logger.info(f"Sent {len(items_payload)} booked items to user {requester_user_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to get/push booked items for user {requester_user_id}: {e}", exc_info=True)
+            await kafka_producer.send("wishlist.view.booked_items_failed", {
+                "telegram_id": requester_user_id,
+                "reason": f"Database or Kafka error: {e}"
             })

@@ -43,7 +43,6 @@ from app.handlers.wishlist import (
     process_manual_wishlist_confirm
 )
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logging.basicConfig(level=logging.INFO); logging.info("Lifespan start")
@@ -68,12 +67,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "wishlist.view.all_failed",
         "wishlist.item.add_failed",
         "wishlist.item.parse_failed",
-        "wishlist.item.booked",
-        "wishlist.item.unbooked",
         "wishlist.item.book_failed",
         "wishlist.item.unbook_failed",
         "wishlist.item.delete_failed",
         "wishlist.item.deleted_booker_notification",
+        "wishlist.view.booked_items_success",
         "wishlist.view.booked_items_failed",
     ]
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)

@@ -172,8 +172,6 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
                 text += f"Уже забронено: {len(bookings)} раз\n"
             builder.button(text="🎁 Забронить", callback_data=f"wishlist_book:{item_id}")
     else:
-        if bookings:
-            text += f"\nЗабронено: {len(bookings)} раз\n"
         builder.button(text="🗑️ Удалить", callback_data=f"wishlist_delete:{item_id}")
 
     return text, builder.as_markup()

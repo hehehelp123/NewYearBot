@@ -84,7 +84,7 @@ class KafkaBotConsumer:
                                        "wishlist.view.all_failed",
                                        "wishlist.view.booked_items_failed"):
                         await self.bot.send_message(msg.value["telegram_id"],
-                                                    f"❌ Ошибка просмотра: {escape_markdown(msg.value.get('reason', 'N/A'))}")
+                                                    f"❌ Ошибка просмотра: {msg.value.get('reason', 'N/A')}")
                     elif msg.topic == "user.user.allowed":
                         user_id = msg.value.get("user_id")
                         if user_id: update_allowed_users(user_id, allow=True)
@@ -98,22 +98,16 @@ class KafkaBotConsumer:
                     elif msg.topic == "wishlist.item.deleted_booker_notification":
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"⚠️ Товар '{escape_markdown(msg.value.get('item_name', 'N/A'))}', который ты бронировал, был удален владельцем.")
-                    elif msg.topic == "wishlist.item.booked":
-                        if msg.value.get("telegram_id"):
-                            await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"✅ Ты забронил '{escape_markdown(msg.value.get('item_name', 'N/A'))}'!")
-                    elif msg.topic == "wishlist.item.unbooked":
-                        if msg.value.get("telegram_id"):
-                            await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"✅ Ты снял бронь с '{escape_markdown(msg.value.get('item_name', 'N/A'))}'.")
+                                                        f"⚠️ Товар '{msg.value.get('item_name', 'N/A')}', который ты бронировал, был удален владельцем.")
                     elif msg.topic in ("wishlist.item.add_failed", "wishlist.item.book_failed",
                                        "wishlist.item.unbook_failed", "wishlist.item.delete_failed"):
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"❌ Ошибка: {escape_markdown(msg.value.get('reason', 'N/A'))}")
+                                                        f"❌ Ошибка: {msg.value.get('reason', 'N/A')}")
                     elif msg.topic == "wishlist.item.parse_failed":
                         await self._handle_wishlist_parse_failed(msg.value)
+                    elif msg.topic == "wishlist.view.booked_items_success":
+                        await self._handle_booked_items_view(msg.value)
                 except Exception as e:
                     logger.error(f"Ошибка обработки сообщения из топика {msg.topic}: {e}", exc_info=True)
         except asyncio.CancelledError:
@@ -158,29 +152,29 @@ class KafkaBotConsumer:
             return
 
         builder = InlineKeyboardBuilder()
-        owner_names = []
+        owner_names_map = {}
         processed_ids = set()
 
         for owner_id in owner_ids:
+            if owner_id == requester_id or owner_id in processed_ids:
+                logger.debug(f"Skipping owner_id {owner_id} (self or already processed).")
+                continue
             try:
                 logger.debug(f"Attempting bot.get_chat for owner_id {owner_id}")
                 chat = await self.bot.get_chat(owner_id)
                 name = chat.username or chat.full_name
                 if name:
                     logger.info(f"Got name '{name}' for owner_id {owner_id}")
-                    owner_names.append(name)
-                    builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
+                    owner_names_map[name] = owner_id
                     processed_ids.add(owner_id)
                 else:
                     logger.warning(f"Could not get username or full_name for user {owner_id}")
-                    builder.button(text=f"ID: {owner_id}",
-                                   callback_data=f"all_wishlists_select_id:{owner_id}")  # Добавляем кнопку с ID
+                    owner_names_map[f"ID: {owner_id}"] = owner_id
                     processed_ids.add(owner_id)
 
             except Exception as e:
                 logger.warning(f"Could not fetch info for user {owner_id}: {e}")
-                builder.button(text=f"ID: {owner_id} (ошибка)",
-                               callback_data=f"all_wishlists_select_id:{owner_id}")  # Помечаем ошибку
+                owner_names_map[f"ID: {owner_id} (ошибка)"] = owner_id
                 processed_ids.add(owner_id)
 
         logger.info(f"Collected owner names/IDs: {len(processed_ids)}")
@@ -190,6 +184,9 @@ class KafkaBotConsumer:
             await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
             await ctx.clear()
             return
+
+        for name in sorted(owner_names_map.keys()):
+            builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
 
         builder.adjust(2)
         builder.row(InlineKeyboardButton(text="❌ Закрыть", callback_data="all_wishlists_close"))
@@ -219,12 +216,10 @@ class KafkaBotConsumer:
         caption = value.get("caption")
         filename = value.get("filename", "document.pdf")
         if not all([chat_id, storage_key]): return
-
         file_bytes = storage_service.download_file_as_bytes(storage_key)
         if not file_bytes:
             await self.bot.send_message(chat_id, "Не удалось загрузить вложение.")
             return
-
         document = BufferedInputFile(file_bytes, filename=filename)
         try:
             await self.bot.send_document(chat_id, document, caption=caption, parse_mode="MarkdownV2")
@@ -241,11 +236,9 @@ class KafkaBotConsumer:
         chat_id = value.get("telegram_id")
         tickets = value.get("tickets")
         if not chat_id or not isinstance(tickets, list): return
-
         if not tickets:
             await self.bot.send_message(chat_id, "У вас нет предстоящих поездок.")
             return
-
         await self.bot.send_message(chat_id, f"Найдены билеты ({len(tickets)} шт.):")
         for ticket in tickets:
             builder = InlineKeyboardBuilder()
@@ -291,31 +284,24 @@ class KafkaBotConsumer:
         owner_user_id = value.get("owner_user_id")
         items = value.get("items", [])
         logger.info(f"Got wishlist for {telegram_id}, owner {owner_user_id}")
-
         if not telegram_id or owner_user_id is None:
             logger.warning(f"Invalid wishlist payload: {value}")
             return
-
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
         if not items:
             await self.bot.send_message(telegram_id, "Этот саботажник ничего не добавил.")
             await ctx.clear()
             return
-
         await ctx.set_state(WishlistBrowser.browsing)
         await ctx.set_data({
-            "items": items,
-            "current_index": 0,
-            "owner_user_id": owner_user_id
+            "items": items, "current_index": 0, "owner_user_id": owner_user_id
         })
-
         try:
             text, markup = await build_wishlist_page(ctx, telegram_id)
         except Exception as build_e:
             logger.error(f"Error building wishlist page: {build_e}", exc_info=True)
             await self.bot.send_message(telegram_id, "Ошибка при подготовке вишлиста для отображения.")
             return
-
         try:
             if markup:
                 await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode=None,
@@ -329,16 +315,13 @@ class KafkaBotConsumer:
     async def _handle_user_list_response(self, value: dict):
         admin_id = value.get("admin_id")
         users = value.get("users", [])
-
         if not admin_id:
             logger.warning(f"No admin_id in user list: {value}")
             return
-
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=admin_id, chat_id=admin_id))
         if not users:
             await self.bot.send_message(admin_id, "Нет юзеров для удаления.")
             return
-
         builder = InlineKeyboardBuilder()
         for user in users:
             user_id = user.get("id")
@@ -348,3 +331,31 @@ class KafkaBotConsumer:
         builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="remove_user_cancel"))
         await self.bot.send_message(admin_id, "Выбери юзера для удаления:", reply_markup=builder.as_markup())
         await ctx.set_state(UserRemoval.choosing_user)
+
+    async def _handle_booked_items_view(self, value: dict):
+        telegram_id = value.get("telegram_id")
+        booked_items = value.get("booked_items", [])
+        logger.info(f"Received {len(booked_items)} booked items for user {telegram_id}")
+        if not telegram_id:
+            logger.warning(f"No telegram_id in booked_items_view payload: {value}")
+            return
+        if not booked_items:
+            await self.bot.send_message(telegram_id, "Ты пока ничего не забронировал.")
+            return
+
+        response_text = "Ты забронировал следующие товары:\n\n"
+        for i, item in enumerate(booked_items):
+            owner_name = item.get("owner_name", "Неизвестно")
+            item_name = item.get("name", "Без названия")
+            item_url = item.get("item_url", "")
+            response_text += f"{i + 1}. *{item_name}* (у {owner_name})"
+            if item_url:
+                response_text += f"\n   {item_url}\n"
+            else:
+                response_text += "\n"
+
+        try:
+            await self.bot.send_message(telegram_id, response_text, parse_mode=None, disable_web_page_preview=False)
+        except Exception as e:
+            logger.error(f"Failed to send booked items list: {e}")
+            await self.bot.send_message(telegram_id, "Ошибка при отображении списка забронированных товаров.")

@@ -40,7 +40,6 @@ def get_wishlist_service_features():
                 {
                     "name": "Просмотреть забронированные товары",
                     "type": "action",
-                    "unfinished": True,
                     "kafka_topic": "wishlist.view.booked_items",
                 },
                 {

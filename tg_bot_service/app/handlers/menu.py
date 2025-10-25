@@ -63,11 +63,10 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         is_admin = user_id in settings.ADMIN_TELEGRAM_IDS
         sub_items = selected.get("items") or []
         sub_names = [i.get("name") for i in sub_items if
-                     isinstance(i, Dict) and isinstance(i.get("name"), str) and (
-                                 not i.get("admin_only") or is_admin)]
+                     isinstance(i, Dict) and isinstance(i.get("name"), str) and (not i.get("admin_only") or is_admin)]
         if sub_names:
             await state.update_data(current_node=selected)
-            kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=True)
+            kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=False)
             await message.answer("Кликай!", reply_markup=kb)
         else:
             await message.answer("Ну и как ты сюда попал?..")

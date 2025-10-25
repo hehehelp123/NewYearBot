@@ -193,13 +193,19 @@ async def handle_wishlist_get_viewer(event_data: dict):
 async def handle_wishlist_get_booked(event_data: dict):
     try:
         requester_user_id = event_data["telegram_id"]
-        logger.warning(f"Handler 'get_booked' is not implemented. Skipping for user {requester_user_id}.")
-        await kafka_producer.send("wishlist.view.booked_items_failed", {
-             "telegram_id": requester_user_id,
-             "reason": "This feature is not yet implemented."
-        })
+        async with AsyncSessionLocal() as session:
+            service = WishlistService(session)
+            await service.get_and_push_booked_items_for_user(requester_user_id)
+        logger.info(f"Task to get booked items for user {requester_user_id} processed.")
     except Exception as e:
         logger.error(f"Error processing get_booked event: {e}", exc_info=True)
+        try:
+             await kafka_producer.send("wishlist.view.booked_items_failed", {
+                 "telegram_id": event_data.get("telegram_id", "unknown"),
+                 "reason": f"Internal error processing get_booked: {e}"
+             })
+        except Exception as kafka_e:
+             logger.error(f"Failed to send booked_items_failed event after get_booked error: {kafka_e}")
 
 async def handle_wishlist_get_all(event_data: dict):
     try:
