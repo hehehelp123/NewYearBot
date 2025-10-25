@@ -9,6 +9,7 @@ from app.kafka.consumer import kafka_consumer
 from app.core.config import settings
 from app.api.v1 import routers as v1_routers
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application lifespan startup...")
 
     kafka_ready = False
-    for i in range(settings.KAFKA_CONNECT_RETRIES):
+    for i in range(settings.KAFTKA_CONNECT_RETRIES):
         try:
             await kafka_producer.start()
             logger.info("KafkaProducer started.")
@@ -49,7 +50,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.include_router(v1_routers.api_router, prefix="/api/v1")
+app.include_router(v1_routers.router, prefix="/api/v1")
 
 
 @app.get("/health")
