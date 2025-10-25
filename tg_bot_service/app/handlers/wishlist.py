@@ -298,7 +298,6 @@ async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMConte
                 "requester_user_id": requester_id,
                 "telegram_id": requester_id
             })
-            # Используем parse_mode=None для избежания ошибок
             await query.message.edit_text(f"Загружаю вишлист для {owner_name}",
                                           parse_mode=None, reply_markup=None)
         except Exception as e:

@@ -45,6 +45,7 @@ kafka-topics --create --if-not-exists --topic wishlist.view.viewer_failed --boot
 kafka-topics --create --if-not-exists --topic wishlist.scrape.request --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
 kafka-topics --create --if-not-exists --topic wishlist.scrape.success --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
 kafka-topics --create --if-not-exists --topic wishlist.scrape.failed --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
+kafka-topics --create --if-not-exists --topic wishlist.view.all --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
 
 # --- Music Service Topics ---
 kafka-topics --create --if-not-exists --topic music.download.request --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1

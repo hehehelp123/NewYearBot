@@ -128,25 +128,17 @@ class KafkaBotConsumer:
         source_url = value.get("source_url", "")
         if not telegram_id:
             return
-
         logger.warning(f"Parse failed for user {telegram_id}, url {source_url}")
-
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
-
         prefilled_name = f"Примерно как по ссылке {source_url}"
-
         await ctx.set_state(WishlistAddManual.waiting_for_cost)
         await ctx.update_data(manual_add_data={
-            "telegram_id": telegram_id,
-            "name": prefilled_name,
-            "item_url": source_url
+            "telegram_id": telegram_id, "name": prefilled_name, "item_url": source_url
         })
-
         await self.bot.send_message(telegram_id,
                                     f"Не смог спарсить инфу по ссылке. 😥\n"
-                                    f"Давай добавим руками. Я заполнил название:\n*{escape_markdown(prefilled_name)}*\n\n"
-                                    f"Введи примерную цену (или 'пропустить'):",
-                                    parse_mode="MarkdownV2")  # Тут Markdown нужен
+                                    f"Давай добавим руками. Я заполнил название:\n{prefilled_name}\n\n"
+                                    f"Введи примерную цену (или 'пропустить'):", parse_mode=None)
 
     async def _handle_all_wishlists_view(self, value: dict):
         requester_id = value.get("telegram_id")
@@ -184,14 +176,20 @@ class KafkaBotConsumer:
                     processed_ids.add(owner_id)
                 else:
                     logger.warning(f"Could not get username or full_name for user {owner_id}")
+                    builder.button(text=f"ID: {owner_id}",
+                                   callback_data=f"all_wishlists_select_id:{owner_id}")  # Добавляем кнопку с ID
+                    processed_ids.add(owner_id)
 
             except Exception as e:
                 logger.warning(f"Could not fetch info for user {owner_id}: {e}")
+                builder.button(text=f"ID: {owner_id} (ошибка)",
+                               callback_data=f"all_wishlists_select_id:{owner_id}")  # Помечаем ошибку
+                processed_ids.add(owner_id)
 
-        logger.info(f"Collected owner names: {owner_names}")
-        if not owner_names:
+        logger.info(f"Collected owner names/IDs: {len(processed_ids)}")
+        if not processed_ids:
             logger.info(
-                f"No valid owner names found (excluding self). Sending message and clearing state for {requester_id}.")
+                f"No valid owner names or IDs found (excluding self). Sending message and clearing state for {requester_id}.")
             await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
             await ctx.clear()
             return
@@ -227,7 +225,7 @@ class KafkaBotConsumer:
 
         file_bytes = storage_service.download_file_as_bytes(storage_key)
         if not file_bytes:
-            await self.bot.send_message(chat_id, "Не удалось загрузить вложение\\.")
+            await self.bot.send_message(chat_id, "Не удалось загрузить вложение.")
             return
 
         document = BufferedInputFile(file_bytes, filename=filename)
@@ -248,10 +246,10 @@ class KafkaBotConsumer:
         if not chat_id or not isinstance(tickets, list): return
 
         if not tickets:
-            await self.bot.send_message(chat_id, "У вас нет предстоящих поездок\\.")
+            await self.bot.send_message(chat_id, "У вас нет предстоящих поездок.")
             return
 
-        await self.bot.send_message(chat_id, f"Найдены билеты ({len(tickets)} шт\\.):")
+        await self.bot.send_message(chat_id, f"Найдены билеты ({len(tickets)} шт.):")
         for ticket in tickets:
             builder = InlineKeyboardBuilder()
             builder.button(text="📄 Скачать PDF", callback_data=f"download_ticket:{ticket['ticket_id']}")
@@ -260,46 +258,34 @@ class KafkaBotConsumer:
             def format_dt(dt_str):
                 if not dt_str: return "н/д"
                 try:
-                    # Убираем 'Z' если есть (не стандарт ISO для Python < 3.11)
                     dt_str = dt_str.replace('Z', '+00:00')
-                    # Проверяем, есть ли микросекунды
-                    if '.' in dt_str.split('+')[0]:  # Проверяем до таймзоны
+                    if '.' in dt_str.split('+')[0]:
                         dt_obj = datetime.fromisoformat(dt_str)
                     else:
-                        # Добавляем стандартные микросекунды, если их нет
                         parts = dt_str.split('+')
                         dt_part = parts[0]
                         tz_part = parts[1] if len(parts) > 1 else None
                         dt_part += ".000000"
                         full_dt_str = dt_part + ('+' + tz_part if tz_part else '')
                         dt_obj = datetime.fromisoformat(full_dt_str)
-
-                    return escape_markdown(dt_obj.strftime('%d.%m.%Y в %H:%M'))
+                    return dt_obj.strftime('%d.%m.%Y в %H:%M')
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Could not parse date string '{dt_str}': {e}")
                     return "н/д"
 
             text = (
-                f"*{escape_markdown(ticket['title'])}*\n\n"
-                f"Пассажир: *{escape_markdown(ticket.get('passenger_name') or 'н/д')}*\n"
-                f"Поезд: *{escape_markdown(ticket.get('train_number') or 'н/д')}* \\| "
-                f"Вагон: *{escape_markdown(ticket.get('wagon_number') or 'н/д')}* \\| "
-                f"Место: *{escape_markdown(ticket.get('seat_number') or 'н/д')}*\n\n"
-                f"📍 *Отправление:* {escape_markdown(ticket.get('departure_station') or 'н/д')}\n"
+                f"*{ticket['title']}*\n\n"
+                f"Пассажир: *{ticket.get('passenger_name') or 'н/д'}*\n"
+                f"Поезд: *{ticket.get('train_number') or 'н/д'}* | "
+                f"Вагон: *{ticket.get('wagon_number') or 'н/д'}* | "
+                f"Место: *{ticket.get('seat_number') or 'н/д'}*\n\n"
+                f"📍 *Отправление:* {ticket.get('departure_station') or 'н/д'}\n"
                 f"   {format_dt(ticket.get('departure_datetime'))}\n"
-                f"🏁 *Прибытие:* {escape_markdown(ticket.get('arrival_station') or 'н/д')}\n"
+                f"🏁 *Прибытие:* {ticket.get('arrival_station') or 'н/д'}\n"
                 f"   {format_dt(ticket.get('arrival_datetime'))}"
             )
             try:
-                await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
-            except TelegramBadRequest as e:
-                logger.error(f"Failed to send ticket info with MarkdownV2: {e}. Text: {text}")
-                try:
-                    plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
-                    plain_text = plain_text.replace('*', '').replace('_', '')
-                    await self.bot.send_message(chat_id, plain_text, reply_markup=builder.as_markup())
-                except Exception as plain_e:
-                    logger.error(f"Failed to send ticket info even plain: {plain_e}")
+                await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send ticket info: {e}")
 
