@@ -19,7 +19,7 @@ def get_wishlist_service_features():
                     "type": "action",
                     "kafka_topic": "wishlist.wishlist.add",
                     "payload": {
-                        "source_url": {"type": "string", "description": "Ссылка на товар ozon/wildberries/aliexpress/yandex market"}
+                        "source_text": {"type": "string", "description": "Текст, содержащий ссылку на товар (ozon/wb/ali/ya)"}
                     },
                 },
                 {
