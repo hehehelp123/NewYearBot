@@ -14,7 +14,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, Sta
 from app.core.config import settings
 
 DOWNLOAD_PATH = "/app/downloads"
-COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies.txt")
+COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies_wishlist.txt")
 
 logger = logging.getLogger(__name__)
 

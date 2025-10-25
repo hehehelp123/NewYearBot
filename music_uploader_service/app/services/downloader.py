@@ -10,7 +10,7 @@ from mutagen.easyid3 import EasyID3
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_PATH = "/app/downloads"
-COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies.txt")
+COOKIE_FILE = os.path.join(DOWNLOAD_PATH, "cookies_music.txt")
 
 class YtdlpLogger:
     def debug(self, msg):
