@@ -8,17 +8,44 @@ from app.schemas.wishlist_schemas import (
     WishlistForOwner, 
     WishlistForViewer, 
     WishlistItemCreate, 
-    WishlistItemForOwner
+    WishlistItemForOwner,
+    WishlistOwnerList
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
-
+from sqlalchemy.orm import joinedload
+from app.models.wishlist_models import ItemBooking, WishlistItem, Wishlist
+from app.schemas.wishlist_schemas import WishlistForViewer, WishlistItemForViewer
 logger = logging.getLogger(__name__)
 
 
 class WishlistService:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
+
+    async def get_and_push_all_wishlist_owners(self, requester_user_id: int):
+        logger.debug(f"Fetching all wishlist owners for user {requester_user_id}")
+        
+        try:
+            query = select(Wishlist.owner_user_id).distinct()
+            result = await self.db_session.execute(query)
+            owner_ids = result.scalars().all()
+            
+            schema = WishlistOwnerList(owner_user_ids=owner_ids)
+            payload = schema.model_dump(mode="json")
+            
+            payload["telegram_id"] = requester_user_id
+            await kafka_producer.send("wishlist.view.all_success", payload)
+            
+            logger.info(f"Sent all wishlist owners list (count: {len(owner_ids)}) to user {requester_user_id} "
+                        f"on topic 'wishlist.view.all_success'")
+        
+        except Exception as e:
+            logger.error(f"Failed to fetch, serialize, and send all wishlist owners: {e}", exc_info=True)
+            await kafka_producer.send("wishlist.view.all_failed", {
+                "telegram_id": requester_user_id,
+                "reason": f"Internal server error: {e}"
+            })
 
     async def get_wishlist_by_id(self, wishlist_id: int) -> Wishlist | None:
         logger.debug(f"Fetching wishlist by id: {wishlist_id}")
@@ -263,32 +290,6 @@ class WishlistService:
             failure_payload["reason"] = f"Database error: {e}"
             await kafka_producer.send("wishlist.item.delete_failed", failure_payload)
 
-    async def get_and_push_wishlist_for_owner(self, owner_user_name: str, requester_user_id: int):
-        wishlist = await self.get_wishlist_by_owner_id(owner_user_name)
-        
-        if not wishlist:
-            logger.warning(f"No wishlist found for owner {owner_user_name} (requested by {requester_user_id}).")
-            await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_name": owner_user_name,
-                "telegram_id": requester_user_id,
-                "reason": "Wishlist not found."
-            })
-            return
-
-        try:
-            owner_schema = WishlistForOwner.model_validate(wishlist)
-            owner_payload = owner_schema.model_dump(mode="json")
-            owner_payload["telegram_id"] = requester_user_id
-            await kafka_producer.send("wishlist.view.owner_success", owner_payload)
-            logger.info(f"Sent owner view for wishlist {wishlist.wishlist_id} to user {requester_user_id}")
-        except Exception as e:
-            logger.error(f"Failed to serialize and send owner view for {owner_user_name}: {e}")
-            await kafka_producer.send("wishlist.view.owner_failed", {
-                "owner_user_name": owner_user_name,
-                "telegram_id": requester_user_id,
-                "reason": f"Internal serialization error: {e}"
-            })
-
     async def get_and_push_wishlist_for_viewer(self, owner_user_name: str, requester_user_id: int):
         wishlist = await self.get_wishlist_by_owner_name(owner_user_name)
         
@@ -314,6 +315,42 @@ class WishlistService:
                 "telegram_id": requester_user_id,
                 "reason": f"Internal serialization error: {e}"
             })
+
+    async def get_and_push_booked_items_for_user(self, requester_user_id: int):
+        """
+        Fetches all items booked by a specific user and sends them to the bot
+        using the *existing* viewer_success topic and schema.
+        """
+        logger.debug(f"Fetching booked items for user {requester_user_id}")
+        
+        
+        query = (
+            select(WishlistItem)
+            .join(ItemBooking, WishlistItem.item_id == ItemBooking.item_id)
+            .where(ItemBooking.booked_by_user_id == requester_user_id)
+            .options(
+                selectinload(WishlistItem.booking),
+                selectinload(WishlistItem.wishlist)
+            )
+            .order_by(ItemBooking.booked_at.desc())
+        )
+        
+        result = await self.db_session.execute(query)
+        db_items = result.scalars().all()
+        viewer_items = [WishlistItemForViewer.model_validate(item) for item in db_items]
+        viewer_schema = WishlistForViewer(
+            owner_user_id=0, # Dummy ID
+            name="My Booked Items",
+            wishlist_id=0,   # Dummy ID
+            items=viewer_items
+        )
+        
+        viewer_payload = viewer_schema.model_dump(mode="json")
+        viewer_payload["telegram_id"] = requester_user_id
+        await kafka_producer.send("wishlist.view.viewer_success", viewer_payload)
+        
+        logger.info(f"Sent booked items list (count: {len(viewer_items)}) to user {requester_user_id} "
+                    f"on topic 'wishlist.view.viewer_success'")
 
 
     async def get_wishlist_by_owner_name(self, owner_user_name: str) -> Wishlist | None:

@@ -34,6 +34,8 @@ class ActionForm(StatesGroup):
 class WishlistBrowser(StatesGroup):
     browsing = State()
 
+class AllWishlistsBrowser(StatesGroup):
+    choosing_owner = State()
 
 class MediaUpload(StatesGroup):
     waiting_for_year = State()
@@ -258,7 +260,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     current_node = data.get("current_node", await load_schema())
     selected = find_item_by_name(message.text, current_node, message.from_user.id)
-
+    logger.info("Меню.")
     if selected is None:
         is_admin_button = any(
             item.get("name") == message.text and item.get("admin_only") for item in current_node.get("items", []) if
@@ -313,6 +315,10 @@ async def start_form_action(action: dict, message: Message, state: FSMContext):
                 logger.error(f"Kafka error: {e}", exc_info=True)
                 await message.answer(f"Ошибка: {e}")
             finally:
+                if action.get("unfinished"):
+                    logger.debug("Action unfinished")
+                    return
+                logger.debug("Action unfinished")
                 await reset_to_main_menu(message, state, is_action_finish=True)
     else:
         await state.set_state(ActionForm.waiting_for_field)
@@ -389,6 +395,7 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
             if action.get("unfinished"):
                 logger.debug("Action unfinished")
                 return
+            logger.debug("Action unfinished")
             await reset_to_main_menu(message, state, is_action_finish=True)
 
 
@@ -458,6 +465,7 @@ async def callback_query_handler(query: CallbackQuery, bot: Bot, state: FSMConte
 
 async def reset_to_main_menu(message: Message, state: FSMContext, is_action_finish: bool = False):
     await state.clear()
+    logging.info("state_clear")
     user_id = message.from_user.id
     item_names = await get_root_items(user_id)
     item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
@@ -818,3 +826,28 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
     except Exception as e:
         logger.warning(f"Wishlist nav error: {e}")
         await query.answer()
+
+async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
+    await query.answer()
+    action, *value = query.data.split(":", 1)
+    
+    if action == "all_wishlists_close":
+        await query.message.delete()
+        await state.clear()
+        return
+    
+    if action == "all_wishlists_select":
+        owner_name = value[0]
+        requester_id = query.from_user.id
+        logger.info(f"User {requester_id} requests wishlist for owner '{owner_name}'")
+        try:
+            await kafka_producer.send("wishlist.view.viewer", {
+                "target_user": owner_name,
+                "requester_user_id": requester_id,
+                "telegram_id": requester_id
+            })
+            await query.message.edit_text(f"Загружаю вишлист для *{escape_markdown(owner_name)}*",
+                                          parse_mode="MarkdownV2", reply_markup=None)
+        except Exception as e:
+            logger.error(f"Kafka error on 'wishlist.view.viewer': {e}")
+            await query.message.answer("Не удалось запросить вишлист.")

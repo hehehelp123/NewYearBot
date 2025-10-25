@@ -100,3 +100,6 @@ venv.bak
 /edge_profile_data
 /selenium_downloads
 /firefox_profile_data
+firefox_profile_wishlist/.parentlock
+firefox_profile_wishlist/addonStartup.json.lz4
+/firefox_profile_wishlist

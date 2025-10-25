@@ -23,7 +23,6 @@ async def lifespan(app: FastAPI):
         "wishlist.item.deleted",
         "wishlist.item.delete_failed",
         "wishlist.view.viewer_failed",
-        "wishlist.view.owner_failed"
     )
     await consumer.start()
     scheduler_task = start_scheduler()
