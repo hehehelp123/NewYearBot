@@ -95,42 +95,25 @@ class KafkaBotConsumer:
                         await self._handle_user_list_response(msg.value)
                     elif msg.topic == "wishlist.view.all_success":
                         await self._handle_all_wishlists_view(msg.value)
-
-                    elif msg.topic == "wishlist.item.added":
-                        if msg.value.get("telegram_id"):
-                            await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"✅ Товар '{escape_markdown(msg.value.get('name', 'N/A'))}' добавлен!")
-
-                    elif msg.topic == "wishlist.item.deleted":
-                        if msg.value.get("telegram_id"):
-                            await self.bot.send_message(msg.value.get("telegram_id"),
-                                                        f"✅ Товар '{escape_markdown(msg.value.get('name', 'N/A'))}' удален.")
-
                     elif msg.topic == "wishlist.item.deleted_booker_notification":
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
                                                         f"⚠️ Товар '{escape_markdown(msg.value.get('item_name', 'N/A'))}', который ты бронировал, был удален владельцем.")
-
-
                     elif msg.topic == "wishlist.item.booked":
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
                                                         f"✅ Ты забронил '{escape_markdown(msg.value.get('item_name', 'N/A'))}'!")
-
                     elif msg.topic == "wishlist.item.unbooked":
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
                                                         f"✅ Ты снял бронь с '{escape_markdown(msg.value.get('item_name', 'N/A'))}'.")
-
                     elif msg.topic in ("wishlist.item.add_failed", "wishlist.item.book_failed",
                                        "wishlist.item.unbook_failed", "wishlist.item.delete_failed"):
                         if msg.value.get("telegram_id"):
                             await self.bot.send_message(msg.value.get("telegram_id"),
                                                         f"❌ Ошибка: {escape_markdown(msg.value.get('reason', 'N/A'))}")
-
                     elif msg.topic == "wishlist.item.parse_failed":
                         await self._handle_wishlist_parse_failed(msg.value)
-
                 except Exception as e:
                     logger.error(f"Ошибка обработки сообщения из топика {msg.topic}: {e}", exc_info=True)
         except asyncio.CancelledError:
@@ -162,12 +145,13 @@ class KafkaBotConsumer:
         await self.bot.send_message(telegram_id,
                                     f"Не смог спарсить инфу по ссылке. 😥\n"
                                     f"Давай добавим руками. Я заполнил название:\n*{escape_markdown(prefilled_name)}*\n\n"
-                                    f"Введи примерную цену (или 'пропустить'):"
-                                    )
+                                    f"Введи примерную цену (или 'пропустить'):",
+                                    parse_mode="MarkdownV2")  # Тут Markdown нужен
 
     async def _handle_all_wishlists_view(self, value: dict):
         requester_id = value.get("telegram_id")
         owner_ids = value.get("owner_user_ids", [])
+        logger.info(f"_handle_all_wishlists_view called for {requester_id}. Received owner_ids: {owner_ids}")
 
         if not requester_id:
             logger.warning(f"No telegram_id in all_wishlists_view payload: {value}")
@@ -176,22 +160,25 @@ class KafkaBotConsumer:
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=requester_id, chat_id=requester_id))
 
         if not owner_ids:
+            logger.info(f"No owner IDs found for {requester_id}. Sending message and clearing state.")
             await self.bot.send_message(requester_id, "Пока никто не создал вишлист.")
             await ctx.clear()
             return
 
         builder = InlineKeyboardBuilder()
         owner_names = []
-
         processed_ids = set()
 
         for owner_id in owner_ids:
             if owner_id == requester_id or owner_id in processed_ids:
+                logger.debug(f"Skipping owner_id {owner_id} (self or already processed).")
                 continue
             try:
+                logger.debug(f"Attempting bot.get_chat for owner_id {owner_id}")
                 chat = await self.bot.get_chat(owner_id)
                 name = chat.username or chat.full_name
                 if name:
+                    logger.info(f"Got name '{name}' for owner_id {owner_id}")
                     owner_names.append(name)
                     builder.button(text=name, callback_data=f"all_wishlists_select:{name}")
                     processed_ids.add(owner_id)
@@ -201,7 +188,10 @@ class KafkaBotConsumer:
             except Exception as e:
                 logger.warning(f"Could not fetch info for user {owner_id}: {e}")
 
+        logger.info(f"Collected owner names: {owner_names}")
         if not owner_names:
+            logger.info(
+                f"No valid owner names found (excluding self). Sending message and clearing state for {requester_id}.")
             await self.bot.send_message(requester_id, "Некого смотреть (кроме себя).")
             await ctx.clear()
             return
@@ -210,6 +200,7 @@ class KafkaBotConsumer:
         builder.row(InlineKeyboardButton(text="❌ Закрыть", callback_data="all_wishlists_close"))
 
         await ctx.set_state(AllWishlistsBrowser.choosing_owner)
+        logger.info(f"Setting state to choosing_owner for {requester_id}. Sending keyboard.")
         await self.bot.send_message(requester_id, "Выбери, чей вишлист посмотреть:", reply_markup=builder.as_markup())
 
     async def _handle_text_message(self, value: dict):
@@ -267,13 +258,25 @@ class KafkaBotConsumer:
             builder.button(text="🗑️ Удалить", callback_data=f"delete_ticket:{ticket['ticket_id']}")
 
             def format_dt(dt_str):
+                if not dt_str: return "н/д"
                 try:
-                    if '.' in dt_str:
+                    # Убираем 'Z' если есть (не стандарт ISO для Python < 3.11)
+                    dt_str = dt_str.replace('Z', '+00:00')
+                    # Проверяем, есть ли микросекунды
+                    if '.' in dt_str.split('+')[0]:  # Проверяем до таймзоны
                         dt_obj = datetime.fromisoformat(dt_str)
                     else:
-                        dt_obj = datetime.fromisoformat(dt_str + ".000000")
+                        # Добавляем стандартные микросекунды, если их нет
+                        parts = dt_str.split('+')
+                        dt_part = parts[0]
+                        tz_part = parts[1] if len(parts) > 1 else None
+                        dt_part += ".000000"
+                        full_dt_str = dt_part + ('+' + tz_part if tz_part else '')
+                        dt_obj = datetime.fromisoformat(full_dt_str)
+
                     return escape_markdown(dt_obj.strftime('%d.%m.%Y в %H:%M'))
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse date string '{dt_str}': {e}")
                     return "н/д"
 
             text = (
@@ -332,27 +335,13 @@ class KafkaBotConsumer:
 
         try:
             if markup:
-                await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode="MarkdownV2",
+                await self.bot.send_message(telegram_id, text, reply_markup=markup, parse_mode=None,
                                             disable_web_page_preview=False)
             else:
-                await self.bot.send_message(telegram_id, text, parse_mode="MarkdownV2", disable_web_page_preview=False)
-        except TelegramBadRequest as e:
-            logger.error(f"Failed to send wishlist view message (MarkdownV2): {e}. Problematic text:\n>>>\n{text}\n<<<")
-            try:
-                plain_text = re.sub(r'\\([_*\[\]()~`>#\+\-=|{}.!])', r'\1', text)
-                plain_text = plain_text.replace('*', '').replace('_', '')
-                if markup:
-                    await self.bot.send_message(telegram_id, plain_text, reply_markup=markup,
-                                                disable_web_page_preview=False)
-                else:
-                    await self.bot.send_message(telegram_id, plain_text, disable_web_page_preview=False)
-                logger.info("Successfully sent wishlist view as plain text after MarkdownV2 failure.")
-            except Exception as plain_e:
-                logger.error(f"Failed to send wishlist view even as plain text: {plain_e}")
-                await self.bot.send_message(telegram_id, "Произошла ошибка при отображении вишлиста.")
+                await self.bot.send_message(telegram_id, text, parse_mode=None, disable_web_page_preview=False)
         except Exception as e:
-            logger.error(f"Unexpected error sending wishlist view: {e}", exc_info=True)
-            await self.bot.send_message(telegram_id, "Произошла неожиданная ошибка при отображении вишлиста.")
+            logger.error(f"Failed to send wishlist view message (plain text): {e}. Text: {text}")
+            await self.bot.send_message(telegram_id, "Произошла ошибка при отображении вишлиста.")
 
     async def _handle_user_list_response(self, value: dict):
         admin_id = value.get("admin_id")
