@@ -75,7 +75,7 @@ WELCOME_IMAGE_FILE_ID = "AgACAgIAAxkBAAIF1Gj74baO7XmV0gE64s7Acb28_VvNAALA9zEbLIb
 WELCOME_TEXT = (
     "Доброго утра тебя, товарищ, и с наступающим (Новый год наступает тогда, когда ему хочется, а не по календарю) Новым годом! 🎄✨\n\n"
     "Этот бот создан упростить тебе жизнь, если мы с Максом не совсем долбоящеры, или сделать ее чуточку смешнее в противном случае.\n\n"
-    "Кликай все, что кликается, по идее работает все, а если не работает то анлак. "
+    "Кликай все, что кликается, по идее работает все, а если не работает то анлак"
     "Короче, бля, удачи 😉\n\n"
     "С наступающим!"
 )
@@ -130,18 +130,15 @@ async def get_root_items(user_id: int) -> List[str]:
            and (not item.get("admin_only") or is_admin)
     ]
 
-    if is_admin:
-        item_names.extend([ADMIN_ADD_USER_BUTTON, ADMIN_REMOVE_USER_BUTTON])
-
     return item_names
 
 
-def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optional[Dict]:
+async def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optional[Dict]:
     if not isinstance(node, Dict): return None
 
-    schema = schema_cache
+    schema = await load_schema()
     if not schema:
-        logger.warning("schema_cache пуст при поиске find_item_by_name")
+        logger.warning("Schema is empty in find_item_by_name")
         return None
 
     children = node.get("items") or []
@@ -313,7 +310,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
 
     data = await state.get_data()
     current_node = data.get("current_node", await load_schema())
-    selected = find_item_by_name(message.text, current_node, user_id)
+    selected = await find_item_by_name(message.text, current_node, user_id)
 
     if selected is None:
         is_admin_button = any(
