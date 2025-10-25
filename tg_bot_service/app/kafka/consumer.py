@@ -162,9 +162,6 @@ class KafkaBotConsumer:
         processed_ids = set()
 
         for owner_id in owner_ids:
-            if owner_id == requester_id or owner_id in processed_ids:
-                logger.debug(f"Skipping owner_id {owner_id} (self or already processed).")
-                continue
             try:
                 logger.debug(f"Attempting bot.get_chat for owner_id {owner_id}")
                 chat = await self.bot.get_chat(owner_id)
