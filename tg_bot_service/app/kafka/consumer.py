@@ -26,11 +26,9 @@ from app.bot.states import (
     BookedItemsBrowser
 )
 from app.bot.utils import escape_markdown
+from app.bot.constants import CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON
 
 logger = logging.getLogger(__name__)
-
-CLOSE_WISHLIST_BUTTON = "❌ Закрыть вишлист"
-CLOSE_BOOKED_BUTTON = "❌ Закрыть брони"
 
 
 class KafkaBotConsumer:
