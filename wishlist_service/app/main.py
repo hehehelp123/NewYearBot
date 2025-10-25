@@ -24,7 +24,8 @@ consumer = KafkaConsumer(
     "wishlist.view.owner",
     "wishlist.item.delete",
     "wishlist.item.add_manual",
-    "wishlist.view.all"
+    "wishlist.view.all",
+    "wishlist.view.booked_items"
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -56,14 +57,12 @@ async def lifespan(app: FastAPI):
              logger.error(f"❌ An unexpected error occurred during Kafka startup: {e}. Exiting.", exc_info=True)
              raise
 
-
     yield
 
     logging.info("Application lifespan shutdown...")
     await kafka_producer.stop()
     await consumer.stop()
     logging.info("Kafka producer and consumer stopped.")
-
 
 app = FastAPI(
     title="Wishlist Service",

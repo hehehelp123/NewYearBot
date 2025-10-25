@@ -62,12 +62,21 @@ async def create_wishlist(wishlist: WishlistCreate, db: AsyncSession = Depends(g
     wishlist_service = WishlistService(db)
     try:
         new_wishlist = await wishlist_service.create_wishlist(wishlist)
-        return new_wishlist
+        if new_wishlist:
+            return WishlistForOwner.model_validate(new_wishlist)
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Wishlist already exists or failed to fetch after creation")
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database integrity error."
         )
+    except Exception as e:
+         raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {e}"
+        )
+
 
 @router.get("/wishlists/{wishlist_id}")
 async def get_wishlist(wishlist_id: int, viewer_user_id: int, db: AsyncSession = Depends(get_db)):
