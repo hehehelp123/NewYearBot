@@ -37,6 +37,12 @@ def get_wishlist_service_features():
                     "unfinished": True,
                     "kafka_topic": "wishlist.view.booked_items",
                 },
+                {
+                    "name": "Просмотреть вишлисты",
+                    "type": "action",
+                    "unfinished": True,
+                    "kafka_topic": "wishlist.view.all",
+                },
             ]
         }
     ]

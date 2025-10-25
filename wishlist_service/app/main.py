@@ -22,7 +22,8 @@ consumer = KafkaConsumer(
     "wishlist.item.unbook",
     "wishlist.view.viewer",
     "wishlist.item.delete",
-    "wishlist.view.booked_items"
+    "wishlist.view.booked_items",
+    "wishlist.view.all"
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,7 +43,7 @@ async def lifespan(app: FastAPI):
             await kafka_producer.start()
             await consumer.start()
             logger.info("Scheduling background task for cookie export.")
-            asyncio.create_task(selenium_downloader.run_cookie_export_background())
+            #asyncio.create_task(selenium_downloader.run_cookie_export_background())
             logging.info("✅ Kafka producer started successfully.")
             break
         except KafkaConnectionError as e:

@@ -8,7 +8,8 @@ from app.schemas.wishlist_schemas import (
     WishlistForOwner, 
     WishlistForViewer, 
     WishlistItemCreate, 
-    WishlistItemForOwner
+    WishlistItemForOwner,
+    WishlistOwnerList
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
@@ -21,6 +22,30 @@ logger = logging.getLogger(__name__)
 class WishlistService:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
+
+    async def get_and_push_all_wishlist_owners(self, requester_user_id: int):
+        logger.debug(f"Fetching all wishlist owners for user {requester_user_id}")
+        
+        try:
+            query = select(Wishlist.owner_user_id).distinct()
+            result = await self.db_session.execute(query)
+            owner_ids = result.scalars().all()
+            
+            schema = WishlistOwnerList(owner_user_ids=owner_ids)
+            payload = schema.model_dump(mode="json")
+            
+            payload["telegram_id"] = requester_user_id
+            await kafka_producer.send("wishlist.view.all_success", payload)
+            
+            logger.info(f"Sent all wishlist owners list (count: {len(owner_ids)}) to user {requester_user_id} "
+                        f"on topic 'wishlist.view.all_success'")
+        
+        except Exception as e:
+            logger.error(f"Failed to fetch, serialize, and send all wishlist owners: {e}", exc_info=True)
+            await kafka_producer.send("wishlist.view.all_failed", {
+                "telegram_id": requester_user_id,
+                "reason": f"Internal server error: {e}"
+            })
 
     async def get_wishlist_by_id(self, wishlist_id: int) -> Wishlist | None:
         logger.debug(f"Fetching wishlist by id: {wishlist_id}")

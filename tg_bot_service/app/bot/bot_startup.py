@@ -15,7 +15,7 @@ from app.middlewares.access_middleware import AccessMiddleware
 from app.bot.bot_app import (
     START_BUTTON, BACK_TO_WELCOME_BUTTON, UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON,
     STOP_UPLOAD_BUTTON, ADMIN_ADD_USER_BUTTON,
-    ActionForm, WishlistBrowser, MediaUpload, AlbumBrowser, UserRemoval,
+    ActionForm, AllWishlistsBrowser, WishlistBrowser, MediaUpload, AlbumBrowser, UserRemoval, all_wishlists_navigation_handler,
     callback_query_handler, menu_handler, process_action_field, start_button_handler,
     start_handler, wishlist_navigation_handler, show_main_menu_callback, show_info_callback,
     back_to_welcome_handler, start_media_upload_handler, stop_media_upload_handler,
@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "notification.send", "notification.send.document", "notification.send.tickets",
         "wishlist.view.owner_success", "wishlist.view.viewer_success",
         "wishlist.view.owner_failed", "wishlist.view.viewer_failed",
-        "user.user.allowed", "user.user.disallowed", "user.user.list_response"
+        "user.user.allowed", "user.user.disallowed", "user.user.list_response",
+        "wishlist.view.all_success"
     ]
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)
     await kafka_consumer.start()
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(start_media_upload_handler, F.text == UPLOAD_MEDIA_BUTTON)
     dp.message.register(start_album_view_handler, F.text == VIEW_ALBUMS_BUTTON)
 
+    dp.callback_query.register(all_wishlists_navigation_handler, StateFilter(AllWishlistsBrowser.choosing_owner))
     dp.callback_query.register(show_main_menu_callback, F.data == "info:go_to_main_menu")
     dp.callback_query.register(show_info_callback, F.data.startswith("info:"))
     dp.callback_query.register(callback_query_handler, F.data.startswith(("download_ticket:", "delete_ticket:", "confirm_delete:", "cancel_delete:")))

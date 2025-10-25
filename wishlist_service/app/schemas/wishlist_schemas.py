@@ -56,3 +56,6 @@ class WishlistForViewer(WishlistBase):
     items: list[WishlistItemForViewer] = []
     model_config = ConfigDict(from_attributes=True)
     
+class WishlistOwnerList(BaseModel):
+    owner_user_ids: list[int]
+    model_config = ConfigDict(from_attributes=True)
