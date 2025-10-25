@@ -18,18 +18,13 @@ from app.middlewares.access_middleware import update_allowed_users
 
 logger = logging.getLogger(__name__)
 
+
 def escape_markdown(text: str) -> str:
-    if not isinstance(text, str): return ""
+    if not isinstance(text, str):
+        return ""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f"({escape_chars})", r"\\\1", text)
 
-def format_dt(dt_str):
-    if not dt_str: return "н/д"
-    try:
-        dt_obj = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-        return escape_markdown(dt_obj.strftime("%d.%m.%Y %H:%M"))
-    except ValueError:
-        return escape_markdown(dt_str)
 
 class KafkaBotConsumer:
     def __init__(self, bot: Bot, dp: Dispatcher, *topics: str):
@@ -51,7 +46,7 @@ class KafkaBotConsumer:
         )
         await self.consumer.start()
         self._task = loop.create_task(self._consume())
-        logger.info("KafkaBotConsumer started.")
+        logger.info(f"TG Bot KafkaConsumer запущен для топиков: {self.topics}")
 
     async def stop(self):
         logger.info("Stopping KafkaBotConsumer...")
@@ -59,7 +54,8 @@ class KafkaBotConsumer:
             self._task.cancel()
             try:
                 if self._task: await self._task
-            except asyncio.CancelledError: pass
+            except asyncio.CancelledError:
+                pass
         if self.consumer:
             await self.consumer.stop()
             logger.info("KafkaBotConsumer stopped.")
@@ -68,14 +64,14 @@ class KafkaBotConsumer:
         if not self.consumer: return
         try:
             async for msg in self.consumer:
-                logger.info(f"Consumed {msg.topic}: key={msg.key} value={msg.value}")
+                logger.info(f"Получено сообщение из топика {msg.topic}: {msg.value}")
                 try:
                     if msg.topic == "notification.send":
-                        await self.bot.send_message(msg.value["chat_id"], msg.value["message"])
+                        await self._handle_text_message(msg.value)
                     elif msg.topic == "notification.send.document":
-                        await self._handle_send_document(msg.value)
+                        await self._handle_document_message(msg.value)
                     elif msg.topic == "notification.send.tickets":
-                        await self._handle_send_tickets(msg.value)
+                        await self._handle_tickets_list(msg.value)
                     elif msg.topic in ("wishlist.view.owner_success", "wishlist.view.viewer_success"):
                         await self._handle_wishlist_view(msg.value)
                     elif msg.topic in ("wishlist.view.owner_failed", "wishlist.view.viewer_failed"):
@@ -88,59 +84,72 @@ class KafkaBotConsumer:
                         if user_id: update_allowed_users(user_id, allow=False)
                     elif msg.topic == "user.user.list_response":
                         await self._handle_user_list_response(msg.value)
+
                 except Exception as e:
-                    logger.error(f"Error processing {msg.topic}: {e}", exc_info=True)
+                    logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
         except asyncio.CancelledError:
-            logger.info("Consumer task cancelled.")
+            logger.info("Задача консумера отменена.")
         except Exception as e:
             logger.error(f"Kafka consumer error: {e}", exc_info=True)
         finally:
-            logger.info("Consumer loop finished.")
+            logger.info("Цикл консумера завершен.")
 
-    async def _handle_send_document(self, value: dict):
-        telegram_id=value.get("telegram_id")
-        object_name=value.get("object_name")
-        caption=value.get("caption")
-        filename=value.get("filename", object_name.split('/')[-1] if object_name else "doc.pdf")
+    async def _handle_text_message(self, value: dict):
+        chat_id = value.get("chat_id")
+        text = value.get("text")
+        if chat_id and text:
+            await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="MarkdownV2")
 
-        if not telegram_id or not object_name:
-            logger.error(f"Invalid doc payload: {value}")
+    async def _handle_document_message(self, value: dict):
+        chat_id = value.get("chat_id")
+        storage_key = value.get("storage_key")
+        caption = value.get("caption")
+        filename = value.get("filename", "document.pdf")
+        if not all([chat_id, storage_key]): return
+
+        file_bytes = storage_service.download_file_as_bytes(storage_key)
+        if not file_bytes:
+            await self.bot.send_message(chat_id, "Не удалось загрузить вложение\\.")
             return
 
-        file_bytes = storage_service.download_file_as_bytes(object_name)
-        if file_bytes:
-            input_file = BufferedInputFile(file_bytes, filename=filename)
-            await self.bot.send_document(telegram_id, input_file, caption=caption)
-        else:
-            await self.bot.send_message(telegram_id, f"Не скачал {filename}.")
+        document = BufferedInputFile(file_bytes, filename=filename)
+        await self.bot.send_document(chat_id, document, caption=caption, parse_mode="MarkdownV2")
 
-    async def _handle_send_tickets(self, value: dict):
-        chat_id=value.get("telegram_id")
-        tickets=value.get("tickets", [])
+    async def _handle_tickets_list(self, value: dict):
+        chat_id = value.get("telegram_id")
+        tickets = value.get("tickets")
+        if not chat_id or not isinstance(tickets, list): return
 
-        if not chat_id:
-            logger.warning(f"No telegram_id for tickets: {value}")
-            return
         if not tickets:
-            await self.bot.send_message(chat_id, "Билетов нет.")
+            await self.bot.send_message(chat_id, "У вас нет предстоящих поездок\\.")
             return
 
-        await self.bot.send_message(chat_id, "Твои билеты:")
+        await self.bot.send_message(chat_id, f"Найдены билеты ({len(tickets)} шт\\.):")
         for ticket in tickets:
             builder = InlineKeyboardBuilder()
-            builder.button(text="📄 Скачать", callback_data=f"download_ticket:{ticket['id']}")
-            builder.button(text="🗑️ Удалить", callback_data=f"delete_ticket:{ticket['id']}")
+            builder.button(text="📄 Скачать PDF", callback_data=f"download_ticket:{ticket['ticket_id']}")
+            builder.button(text="🗑️ Удалить", callback_data=f"delete_ticket:{ticket['ticket_id']}")
+
+            def format_dt(dt_str):
+                return escape_markdown(datetime.fromisoformat(dt_str).strftime('%d.%m.%Y в %H:%M')) if dt_str else "н/д"
+
             text = (
-                f"*{escape_markdown(ticket.get('title', 'Билет'))}*\n"
-                f"{escape_markdown(ticket.get('departure_station') or 'н/д')} \\- {escape_markdown(ticket.get('arrival_station') or 'н/д')}\\n"
-                f"   {format_dt(ticket.get('departure_datetime'))} \\-\\> {format_dt(ticket.get('arrival_datetime'))}"
+                f"*{escape_markdown(ticket['title'])}*\n\n"
+                f"Пассажир: *{escape_markdown(ticket.get('passenger_name') or 'н/д')}*\n"
+                f"Поезд: *{escape_markdown(ticket.get('train_number') or 'н/д')}* \\| "
+                f"Вагон: *{escape_markdown(ticket.get('wagon_number') or 'н/д')}* \\| "
+                f"Место: *{escape_markdown(ticket.get('seat_number') or 'н/д')}*\n\n"
+                f"📍 *Отправление:* {escape_markdown(ticket.get('departure_station') or 'н/д')}\n"
+                f"   {format_dt(ticket.get('departure_datetime'))}\n"
+                f"🏁 *Прибытие:* {escape_markdown(ticket.get('arrival_station') or 'н/д')}\n"
+                f"   {format_dt(ticket.get('arrival_datetime'))}"
             )
             await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
 
     async def _handle_wishlist_view(self, value: dict):
-        telegram_id=value.get("telegram_id")
-        owner_user_id=value.get("owner_user_id")
-        items=value.get("items", [])
+        telegram_id = value.get("telegram_id")
+        owner_user_id = value.get("owner_user_id")
+        items = value.get("items", [])
         logger.info(f"Got wishlist for {telegram_id}, owner {owner_user_id}")
 
         if not telegram_id or owner_user_id is None:
