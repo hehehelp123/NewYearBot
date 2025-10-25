@@ -29,15 +29,6 @@ def get_wishlist_service_features():
                     "kafka_topic": "wishlist.item.add_manual_start",
                 },
                 {
-                    "name": "Просмотреть вишлист пользователя",
-                    "type": "action",
-                    "unfinished": True,
-                    "kafka_topic": "wishlist.view.viewer",
-                    "payload": {
-                        "target_user": {"type": "string", "description": "Введите тэг пользователя"}
-                    },
-                },
-                {
                     "name": "Просмотреть забронированные товары",
                     "type": "action",
                     "kafka_topic": "wishlist.view.booked_items",
