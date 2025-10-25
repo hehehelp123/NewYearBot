@@ -22,15 +22,15 @@ def get_wishlist_service_features():
                         "source_url": {"type": "string", "description": "Ссылка на товар ozon/wildberries/aliexpress/yandex market"}
                     },
                 },
-                {
-                    "name": "Просмотреть вишлист пользователя",
-                    "type": "action",
-                    "unfinished": True,
-                    "kafka_topic": "wishlist.view.viewer",
-                    "payload": {
-                        "target_user": {"type": "string", "description": "Введите тэг пользователя"}
-                    },
-                },
+                # {
+                #     "name": "Просмотреть вишлист пользователя",
+                #     "type": "action",
+                #     "unfinished": True,
+                #     "kafka_topic": "wishlist.view.viewer",
+                #     "payload": {
+                #         "target_user": {"type": "string", "description": "Введите тэг пользователя"}
+                #     },
+                # },
                 {
                     "name": "Просмотреть забронированные товары",
                     "type": "action",

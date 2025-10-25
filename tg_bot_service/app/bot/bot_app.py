@@ -278,7 +278,7 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
                      isinstance(i, Dict) and isinstance(i.get("name"), str) and (not i.get("admin_only") or is_admin)]
         if sub_names:
             await state.update_data(current_node=selected)
-            kb = build_menu_keyboard(sub_names, add_start=True, add_back_to_welcome=True)
+            kb = build_menu_keyboard(sub_names, add_start=True)
             await message.answer("Кликай!", reply_markup=kb)
         else:
             await message.answer("Подменю пусто.")
