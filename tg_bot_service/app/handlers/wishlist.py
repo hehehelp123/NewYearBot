@@ -134,12 +134,13 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     item_delivery = escape_markdown(item_delivery_raw)
     item_name = escape_markdown(item_name_raw)
 
-    # Экранируем URL для вставки в Markdown ссылку
-    item_url_markdown = "N/A"
+    # --- ИЗМЕНЕНИЯ: Улучшенное экранирование URL ---
+    item_url_markdown = escape_markdown(str(item_url_raw) if item_url_raw else "N/A")
     if item_url_raw:
-        # Экранируем символы, которые могут сломать Markdown V2 *внутри* URL
-        escaped_url_for_markdown = item_url_raw.replace('(', '\\(').replace(')', '\\)').replace('-', '\\-')
-        item_url_markdown = f"[Link]({escaped_url_for_markdown})"
+        # Экранируем ТОЛЬКО скобки и дефис ВНУТРИ URL для Markdown V2 ссылки
+        safe_url_content = item_url_raw.replace('(', '\\(').replace(')', '\\)').replace('-', '\\-')
+        item_url_markdown = f"[Link]({safe_url_content})"
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     is_infinitely_bookable = item.get("is_infinitely_bookable", False)
     bookings = item.get("bookings", [])
@@ -170,7 +171,7 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     if is_owner:
         text += f"\n*Статус:* ✅ Ваш товар\\. Доступен для приватизации\n"
         if bookings:
-            text += f"*Забронено:* {len(bookings)} раз\n"  # Владелец может видеть КОЛИЧЕСТВО броней, но не КЕМ
+            text += f"*Забронено:* {len(bookings)} раз\n"
         builder.button(text="🗑️ Отдать африканским детям", callback_data=f"wishlist_delete:{item_id}")
     elif my_booking:
         text += f"\n*Статус:* 🎁 Задание принято, будут кары если не выполните\\!\n"
@@ -178,8 +179,7 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
             text += f"*Также забронено:* {len(bookings) - 1} другими\n"
         builder.button(text="🎁 Молить об отмене", callback_data=f"wishlist_unbook:{item_id}")
     elif not is_infinitely_bookable and bookings:
-        # booker_id = bookings[0].get("booked_by_user_id", "кто\\-то") # Зритель не должен видеть ID другого
-        text += f"\n*Статус:* ⛔️ Захвачено кем\\-то другим\n"  # Убрали ID
+        text += f"\n*Статус:* ⛔️ Захвачено кем\\-то другим\n"
         builder.button(text="⛔️ Захвачен", callback_data="wishlist_noop")
     else:
         text += f"\n*Статус:* ✅ Доступен для захвата\n"
