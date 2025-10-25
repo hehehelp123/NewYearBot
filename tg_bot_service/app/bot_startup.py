@@ -9,13 +9,13 @@ from fastapi import FastAPI
 
 from app.core.config import settings
 from app.core.http_client import http_client
-from app.kafka.consumer import KafkaBotConsumer, CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON
+from app.kafka.consumer import KafkaBotConsumer
 from app.kafka.producer import kafka_producer
 from app.middlewares.access_middleware import AccessMiddleware
 
 from app.bot.constants import (
     START_BUTTON, BACK_TO_WELCOME_BUTTON, UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON,
-    STOP_UPLOAD_BUTTON
+    STOP_UPLOAD_BUTTON, CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON
 )
 from app.bot.states import (
     ActionForm, AllWishlistsBrowser, WishlistBrowser, MediaUpload, AlbumBrowser,
@@ -107,9 +107,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(start_handler, F.text == "/start")
     dp.message.register(back_to_welcome_handler, F.text == BACK_TO_WELCOME_BUTTON)
 
-    dp.message.register(back_to_welcome_handler, F.text == CLOSE_WISHLIST_BUTTON, StateFilter(WishlistBrowser.browsing))
-    dp.message.register(back_to_welcome_handler, F.text == CLOSE_BOOKED_BUTTON,
-                        StateFilter(BookedItemsBrowser.browsing))
+    dp.message.register(start_button_handler, F.text == CLOSE_WISHLIST_BUTTON, StateFilter(WishlistBrowser.browsing))
+    dp.message.register(start_button_handler, F.text == CLOSE_BOOKED_BUTTON, StateFilter(BookedItemsBrowser.browsing))
 
     dp.callback_query.register(all_wishlists_navigation_handler, StateFilter(AllWishlistsBrowser.choosing_owner))
     dp.callback_query.register(show_main_menu_callback, F.data == "info:go_to_main_menu")
