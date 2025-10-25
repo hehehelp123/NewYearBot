@@ -40,7 +40,7 @@ from app.handlers.wishlist import (
     all_wishlists_navigation_handler, wishlist_navigation_handler,
     wishlist_add_url_handler, process_manual_wishlist_name,
     process_manual_wishlist_cost, process_manual_wishlist_url,
-    process_manual_wishlist_delivery, process_manual_wishlist_confirm
+    process_manual_wishlist_confirm
 )
 
 
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "wishlist.view.owner_success", "wishlist.view.viewer_success",
         "wishlist.view.owner_failed", "wishlist.view.viewer_failed",
         "user.user.allowed", "user.user.disallowed", "user.user.list_response",
-        "wishlist.view.all_success",
+        "wishlist.view.all_success", "wishlist.view.all_failed",
         "wishlist.item.added",
         "wishlist.item.add_failed",
         "wishlist.item.parse_failed",
@@ -67,7 +67,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "wishlist.item.book_failed",
         "wishlist.item.unbook_failed",
         "wishlist.item.deleted",
-        "wishlist.item.delete_failed"
+        "wishlist.item.delete_failed",
+        "wishlist.item.deleted_booker_notification",
+        "wishlist.view.booked_items_failed",
     ]
     kafka_consumer = KafkaBotConsumer(bot, dp, *topics_to_consume)
     await kafka_consumer.start()
@@ -89,7 +91,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(process_manual_wishlist_name, StateFilter(WishlistAddManual.waiting_for_name), F.text)
     dp.message.register(process_manual_wishlist_cost, StateFilter(WishlistAddManual.waiting_for_cost), F.text)
     dp.message.register(process_manual_wishlist_url, StateFilter(WishlistAddManual.waiting_for_url), F.text)
-    dp.message.register(process_manual_wishlist_delivery, StateFilter(WishlistAddManual.waiting_for_delivery), F.text)
     dp.callback_query.register(process_manual_wishlist_confirm, StateFilter(WishlistAddManual.confirming), F.data.startswith("wishlist_manual_confirm:"))
 
     dp.message.register(start_handler, F.text == "/start")
