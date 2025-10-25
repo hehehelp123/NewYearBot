@@ -117,8 +117,6 @@ class KafkaBotConsumer:
             owner_names = []
             
             for owner_id in owner_ids:
-                if owner_id == requester_id:
-                    continue
                 try:
                     chat = await self.bot.get_chat(owner_id)
                     name = chat.username or chat.full_name
