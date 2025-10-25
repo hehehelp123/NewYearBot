@@ -244,7 +244,7 @@ async def show_info_callback(query: CallbackQuery):
             builder.button(text=name, url=f"tg://user?id={user_id}")
         builder.button(text="⬅️ Назад", callback_data="info:back_to_welcome")
         builder.adjust(1)
-        await query.message.edit_caption(caption="Жабы со стажем...", reply_markup=builder.as_markup())
+        await query.message.edit_caption(caption="По всем вопросам к ним (за экзистенциальные будете наказаны).", reply_markup=builder.as_markup())
         await query.answer()
     elif action == "back_to_welcome":
         kb = await welcome_keyboard()
