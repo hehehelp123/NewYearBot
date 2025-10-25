@@ -71,7 +71,7 @@ class KafkaBotConsumer:
                 logger.info(f"Consumed {msg.topic}: key={msg.key} value={msg.value}")
                 try:
                     if msg.topic == "notification.send":
-                        await self.bot.send_message(msg.value["telegram_id"], msg.value["message"])
+                        await self.bot.send_message(msg.value["chat_id"], msg.value["message"])
                     elif msg.topic == "notification.send.document":
                         await self._handle_send_document(msg.value)
                     elif msg.topic == "notification.send.tickets":
@@ -115,7 +115,7 @@ class KafkaBotConsumer:
             await self.bot.send_message(telegram_id, f"Не скачал {filename}.")
 
     async def _handle_send_tickets(self, value: dict):
-        chat_id=value.get("chat_id")
+        chat_id=value.get("telegram_id")
         tickets=value.get("tickets", [])
 
         if not chat_id:
