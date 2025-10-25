@@ -49,7 +49,6 @@ async def process_manual_wishlist_name(message: Message, state: FSMContext):
     await state.set_state(WishlistAddManual.waiting_for_cost)
     await message.answer("Теперь введи примерную цену (или 'пропустить'):")
 
-
 async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     data = await state.get_data()
     if "manual_add_data" not in data: data["manual_add_data"] = {}
@@ -58,7 +57,6 @@ async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     await state.set_data(data)
     await state.set_state(WishlistAddManual.waiting_for_url)
     await message.answer("Добавь ссылку (или 'пропустить'):")
-
 
 async def process_manual_wishlist_url(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -134,19 +132,17 @@ async def build_wishlist_page(state: FSMContext, viewer_user_id: int) -> tuple[s
     item_delivery = escape_markdown(item_delivery_raw)
     item_name = escape_markdown(item_name_raw)
 
-    # --- ИЗМЕНЕНИЯ: Улучшенное экранирование URL ---
-    item_url_markdown = escape_markdown(str(item_url_raw) if item_url_raw else "N/A")
-    if item_url_raw:
-        # Экранируем ТОЛЬКО скобки и дефис ВНУТРИ URL для Markdown V2 ссылки
-        safe_url_content = item_url_raw.replace('(', '\\(').replace(')', '\\)').replace('-', '\\-')
-        item_url_markdown = f"[Link]({safe_url_content})"
+    # --- ИЗМЕНЕНИЯ: Отображаем URL как экранированный текст ---
+    item_url_escaped = escape_markdown(str(item_url_raw) if item_url_raw else "N/A")
     # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     is_infinitely_bookable = item.get("is_infinitely_bookable", False)
     bookings = item.get("bookings", [])
 
     text = f"*Товар {current_index + 1}/{len(items)}*\n\n*Название:* {item_name}\n"
-    text += f"*URL:* {item_url_markdown}\n"
+    # --- ИЗМЕНЕНИЯ: Используем экранированный URL ---
+    text += f"*URL:* {item_url_escaped}\n"
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     is_owner = (owner_user_id == viewer_user_id)
     text += f"*Цена:* {item_price}\n*Доставка:* {item_delivery}\n"
@@ -224,11 +220,10 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
 
         text, markup = await build_wishlist_page(state, query.from_user.id)
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
-                                          disable_web_page_preview=True)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         except Exception as e:
-            logger.error(f"Failed to edit message on book: {e}. Text: {text}")
-            await query.message.answer(f"Ошибка отображения: {e}")
+             logger.error(f"Failed to edit message on book: {e}. Text: {text}")
+             await query.message.answer(f"Ошибка отображения: {e}")
         await query.answer("✅ Теперь живи с этим!")
         return
     elif action == "wishlist_unbook":
@@ -243,8 +238,7 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
             await state.update_data(items=items)
         text, markup = await build_wishlist_page(state, query.from_user.id)
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
-                                          disable_web_page_preview=True)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"Failed to edit message on unbook: {e}. Text: {text}")
             await query.message.answer(f"Ошибка отображения: {e}")
@@ -266,8 +260,7 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
         await state.update_data(items=new_items, current_index=new_index)
         text, markup = await build_wishlist_page(state, query.from_user.id)
         try:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
-                                          disable_web_page_preview=True)
+            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"Failed to edit message on delete: {e}. Text: {text}")
             await query.message.answer(f"Ошибка отображения: {e}")
@@ -280,14 +273,18 @@ async def wishlist_navigation_handler(query: CallbackQuery, state: FSMContext, b
     try:
         text, markup = await build_wishlist_page(state, query.from_user.id)
         if text and markup:
-            await query.message.edit_text(text, reply_markup=markup, parse_mode="MarkdownV2",
-                                          disable_web_page_preview=True)
+            # --- ИЗМЕНЕНИЯ: Отправляем новое сообщение вместо редактирования ---
+            await query.message.answer(text, reply_markup=markup, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            await query.message.delete() # Удаляем старое
+            # --- КОНЕЦ ИЗМЕНЕНИЙ ---
         elif text:
-            await query.message.edit_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+             # --- ИЗМЕНЕНИЯ: Отправляем новое сообщение вместо редактирования ---
+            await query.message.answer(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+            await query.message.delete() # Удаляем старое
+             # --- КОНЕЦ ИЗМЕНЕНИЙ ---
     except Exception as e:
-        logger.error(f"Failed to edit message on navigation: {e}. Text: {text}")
+        logger.error(f"Failed to send message on navigation: {e}. Text: {text}")
         await query.message.answer(f"Ошибка отображения: {e}")
-
 
 async def all_wishlists_navigation_handler(query: CallbackQuery, state: FSMContext, bot: Bot):
     await query.answer()
