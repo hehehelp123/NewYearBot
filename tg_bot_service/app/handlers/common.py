@@ -94,7 +94,7 @@ async def show_info_callback(query: CallbackQuery):
             builder.button(text=name, url=f"tg://user?id={user_id}")
         builder.button(text="⬅️ Куда я жмав...", callback_data="info:back_to_welcome")
         builder.adjust(1)
-        await query.message.edit_caption(caption="Жабы со стажем, все вопросы к жабам (за эксзистенциальные будете наказаны).", reply_markup=builder.as_markup())
+        await query.message.edit_caption(caption="Жабы со стажем, все вопросы к жабам (за экзистенциальные будете наказаны).", reply_markup=builder.as_markup())
         await query.answer()
     elif action == "back_to_welcome":
         logger.debug(f"Пользователь {query.from_user.id} вернулся в стартовое меню")
