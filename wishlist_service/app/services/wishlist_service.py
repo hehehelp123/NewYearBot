@@ -16,6 +16,7 @@ from app.schemas.wishlist_schemas import (
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -328,14 +329,17 @@ class WishlistService:
         return result.scalar_one_or_none()
 
     async def get_and_push_all_wishlist_owners(self, requester_user_id: int):
-        logger.info(f"Fetching all wishlist owners for requester {requester_user_id}")
+        logger.info(f"Fetching allowed wishlist owners for requester {requester_user_id}")
         try:
-            query = select(distinct(Wishlist.owner_user_id))
+            query = (
+                select(distinct(Wishlist.owner_user_id))
+                .where(Wishlist.owner_user_id.in_(settings.ALLOWED_WISHLIST_USERS))
+            )
             result = await self.db_session.execute(query)
             owner_ids = result.scalars().all()
             payload = {"telegram_id": requester_user_id, "owner_user_ids": owner_ids}
             await kafka_producer.send("wishlist.view.all_success", payload)
-            logger.info(f"Sent {len(owner_ids)} owner IDs to user {requester_user_id}")
+            logger.info(f"Sent {len(owner_ids)} allowed owner IDs to user {requester_user_id}")
         except Exception as e:
             logger.error(f"Failed to get/push all wishlist owners: {e}", exc_info=True)
             await kafka_producer.send("wishlist.view.all_failed", {
