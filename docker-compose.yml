@@ -217,6 +217,7 @@ services:
   tg_bot_service:
     build:
       context: ./tg_bot_service
+      network: host
     container_name: tg_bot_service
     env_file:
       - .env
@@ -232,6 +233,7 @@ services:
   orchestrator_service:
     build:
       context: ./orchestrator_service
+      network: host
     container_name: orchestrator_service
     env_file:
       - .env
@@ -261,6 +263,7 @@ services:
   user_service:
     build:
       context: ./user_service
+      network: host
     container_name: user_service
     env_file:
       - .env
@@ -284,6 +287,7 @@ services:
   wishlist_service:
     build:
       context: ./wishlist_service
+      network: host
     container_name: wishlist_service
     env_file:
       - .env
@@ -310,6 +314,7 @@ services:
   ticket_service:
     build:
       context: ./ticket_service
+      network: host
     container_name: ticket_service
     env_file:
       - .env
@@ -335,6 +340,7 @@ services:
   notification_service:
     build:
       context: ./notification_service
+      network: host
     container_name: notification_service
     env_file:
       - .env
@@ -354,6 +360,7 @@ services:
   music_uploader_service:
     build:
       context: ./music_uploader_service
+      network: host
     container_name: music_uploader_service
     env_file:
       - .env
