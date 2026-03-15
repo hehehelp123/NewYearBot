@@ -1,56 +1,85 @@
 import logging
 from aiogram import Bot
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.core.config import settings
+from app.core.http_client import http_client
 from app.services.storage_service import storage_service
 from app.bot.states import MediaUpload
 from app.bot.constants import STOP_UPLOAD_BUTTON
-from app.bot.utils import get_current_new_year, get_media_folder, reset_to_main_menu
+from app.bot.utils import get_media_folder, reset_to_main_menu
 from app.bot.keyboards import build_menu_keyboard
 
 logger = logging.getLogger(__name__)
 
 
 async def start_media_upload_handler(message: Message, state: FSMContext):
-    logger.info(f"{message.from_user.id} started media upload.")
-    current_year = get_current_new_year()
-    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=STOP_UPLOAD_BUTTON)]], resize_keyboard=True)
-    if current_year:
-        await state.set_state(MediaUpload.uploading)
-        await state.update_data(year=current_year)
-        await message.answer(
-            f"Режим загрузки фото/видео для Нового Года **{current_year}** включен.\n"
-            "Отправляйте нюдсы (по одному или альбомом) (только если ты не Макс боже умоляю).\n"
-            "Когда закончите, нажмите кнопку внизу.",
-            reply_markup=kb,
-            parse_mode="Markdown"
-        )
-    else:
-        await state.set_state(MediaUpload.waiting_for_year)
-        await message.answer(
-            "Сейчас не 'новогодний сезон' если верить календарю вместо сердца.\n"
-            "**Пожалуйста, введите год**, для которого вы хотите загрузить фото/видео (например, 2024).**",
-            reply_markup=build_menu_keyboard([], add_start=True),
-            parse_mode="Markdown"
-        )
+    logger.info(f"{message.from_user.id} requests media upload.")
+    await state.clear()
+    try:
+        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums")
+        response.raise_for_status()
+        albums = response.json()
+
+        await state.set_state(MediaUpload.choosing_album)
+        builder = InlineKeyboardBuilder()
+
+        for album in albums:
+            builder.button(text=f"Альбом: {album}", callback_data=f"upload_album:{album}")
+
+        is_admin = message.from_user.id in settings.ADMIN_TELEGRAM_IDS
+        if is_admin:
+            builder.button(text="➕ Создать новый альбом", callback_data="upload_album_new")
+
+        builder.button(text="❌ Отмена", callback_data="upload_album_cancel")
+        builder.adjust(1)
+
+        await message.answer("Выберите альбом для загрузки фото/видео:", reply_markup=builder.as_markup())
+    except Exception as e:
+        logger.error(f"Get albums failed: {e}")
+        await message.answer("Не удалось загрузить список альбомов. Попробуйте написать Мише.")
 
 
-async def process_media_year_handler(message: Message, state: FSMContext):
-    if not message.text or not message.text.isdigit():
-        await message.answer("Пожалуйста, числом блять (например, 2024).")
+async def process_album_selection(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    action = query.data
+
+    if action == "upload_album_cancel":
+        await query.message.delete()
+        await state.clear()
         return
-    year = int(message.text)
-    if not (2020 < year < 2030):
-        await message.answer("Пожалуйста, нормальное число, Макс (с 2021 по 2029).")
+
+    if action == "upload_album_new":
+        await query.message.delete()
+        await state.set_state(MediaUpload.waiting_for_new_album_name)
+        await query.message.answer("Введите название нового альбома (лучше латиницей и без пробелов):",
+                                   reply_markup=build_menu_keyboard([], add_start=True))
         return
-    logger.info(f"{message.from_user.id} chose year {year}.")
+
+    album_id = action.split(":")[1]
+    await query.message.delete()
+    await start_upload_for_album(query.message, state, album_id)
+
+
+async def process_new_album_name(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Пожалуйста, отправьте текст.")
+        return
+
+    album_id = message.text.strip()
+    logger.info(f"Admin {message.from_user.id} created new album target: {album_id}")
+    await start_upload_for_album(message, state, album_id)
+
+
+async def start_upload_for_album(message: Message, state: FSMContext, album_id: str):
     await state.set_state(MediaUpload.uploading)
-    await state.update_data(year=year)
+    await state.update_data(album_id=album_id)
     kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=STOP_UPLOAD_BUTTON)]], resize_keyboard=True)
     await message.answer(
-        f"Режим загрузки фото/видео для **{year}** включен.\n"
-        "Отправляйте нюдсы. Когда надоест, так и скажите.",
+        f"Режим загрузки фото/видео для альбома **{album_id}** включен.\n"
+        "Отправляйте нюдсы. Когда закончите, нажмите кнопку внизу.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -68,15 +97,17 @@ async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
         await message.answer("Ну-ка, ну-ка, что тут у нас.")
         return
     data = await state.get_data()
-    year = data.get("year")
-    if not year:
-        logger.warning(f"No year in FSM for {message.from_user.id}.")
+    album_id = data.get("album_id")
+    if not album_id:
+        logger.warning(f"No album_id in FSM for {message.from_user.id}.")
         await stop_media_upload_handler(message, state)
         return
+
     file_id = ""
     file_unique_id = ""
     original_filename = ""
     content_type = ""
+
     if message.photo:
         media = message.photo[-1]
         file_id = media.file_id
@@ -95,7 +126,7 @@ async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
     try:
         file_info = await bot.get_file(file_id)
         file_bytes_io = await bot.download_file(file_info.file_path)
-        folder = get_media_folder(year)
+        folder = get_media_folder(album_id)
         object_name = storage_service.upload_file(file_bytes_io.read(), original_filename, folder=folder,
                                                   content_type=content_type)
         logger.info(f"Uploaded {object_name} to {folder}")

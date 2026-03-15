@@ -17,11 +17,12 @@ class AllWishlistsBrowser(StatesGroup):
     choosing_owner = State()
 
 class MediaUpload(StatesGroup):
-    waiting_for_year = State()
+    choosing_album = State()
+    waiting_for_new_album_name = State()
     uploading = State()
 
 class AlbumBrowser(StatesGroup):
-    choosing_year = State()
+    choosing_album = State()
     browsing = State()
 
 class UserRemoval(StatesGroup):

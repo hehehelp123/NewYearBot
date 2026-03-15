@@ -29,7 +29,7 @@ from app.handlers.common import (
 from app.handlers.menu import menu_handler, process_action_field
 from app.handlers.media import (
     start_media_upload_handler, stop_media_upload_handler,
-    process_media_year_handler, media_upload_handler
+    process_album_selection, process_new_album_name, media_upload_handler
 )
 from app.handlers.albums import start_album_view_handler, album_navigation_handler
 from app.handlers.admin import (
@@ -46,10 +46,10 @@ from app.handlers.wishlist import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logging.basicConfig(level=logging.INFO);
+    logging.basicConfig(level=logging.INFO)
     logging.info("Lifespan start")
-    await http_client.start();
-    bot = Bot(token=settings.BOT_TOKEN);
+    await http_client.start()
+    bot = Bot(token=settings.BOT_TOKEN)
     app.state.bot = bot
     dp = Dispatcher()
 
@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.callback_query.register(wishlist_navigation_handler, StateFilter(WishlistBrowser.browsing))
     dp.callback_query.register(booked_items_navigation_handler, StateFilter(BookedItemsBrowser.browsing))
     dp.callback_query.register(album_navigation_handler, StateFilter(AlbumBrowser))
+
     dp.callback_query.register(handle_remove_user_confirm, StateFilter(UserRemoval.choosing_user),
                                F.data.startswith("remove_user_confirm:"))
     dp.callback_query.register(handle_remove_user_delete, StateFilter(UserRemoval.confirming_delete),
@@ -94,9 +95,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.callback_query.register(handle_remove_user_cancel, StateFilter(UserRemoval), F.data == "remove_user_cancel")
 
     dp.message.register(process_action_field, StateFilter(ActionForm.waiting_for_field), F.text | F.document)
+
     dp.message.register(stop_media_upload_handler, StateFilter(MediaUpload.uploading), F.text == STOP_UPLOAD_BUTTON)
     dp.message.register(media_upload_handler, StateFilter(MediaUpload.uploading), F.photo | F.video)
-    dp.message.register(process_media_year_handler, StateFilter(MediaUpload.waiting_for_year), F.text)
+
+    dp.callback_query.register(process_album_selection, StateFilter(MediaUpload.choosing_album))
+    dp.message.register(process_new_album_name, StateFilter(MediaUpload.waiting_for_new_album_name), F.text)
 
     dp.message.register(process_manual_wishlist_name, StateFilter(WishlistAddManual.waiting_for_name), F.text)
     dp.message.register(process_manual_wishlist_cost, StateFilter(WishlistAddManual.waiting_for_cost), F.text)
@@ -125,14 +129,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
-        await http_client.stop();
-        await kafka_producer.stop();
+        await http_client.stop()
+        await kafka_producer.stop()
         await kafka_consumer.stop()
-        logging.info("Shutting down polling...");
+        logging.info("Shutting down polling...")
         polling_task.cancel()
         try:
             await polling_task
         except asyncio.CancelledError:
             logging.info("Polling cancelled")
-        await bot.session.close();
+        await bot.session.close()
         logging.info("Shutdown complete")

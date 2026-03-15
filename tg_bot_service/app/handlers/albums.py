@@ -1,6 +1,7 @@
 import logging
 from aiogram import Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo, \
+    BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramBadRequest
@@ -16,35 +17,36 @@ async def start_album_view_handler(message: Message, state: FSMContext):
     logger.debug(f"{message.from_user.id} requests albums.")
     await state.clear()
     try:
-        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/years")
+        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums")
         response.raise_for_status()
-        years = response.json()
-        if not years:
+        albums = response.json()
+        if not albums:
             await message.answer("Пока нет ни одного загруженного альбома (базе пиздец):(")
             return
-        await state.set_state(AlbumBrowser.choosing_year)
+        await state.set_state(AlbumBrowser.choosing_album)
         builder = InlineKeyboardBuilder()
-        for year in years:
-            builder.button(text=f"Альбом {year}", callback_data=f"album_year:{year}")
+        for album in albums:
+            builder.button(text=f"Альбом: {album}", callback_data=f"album_view:{album}")
         builder.button(text="❌ Не, нафиг", callback_data="album_close")
-        builder.adjust(2)
+        builder.adjust(1)
         await message.answer("Выберите альбом для просмотра:", reply_markup=builder.as_markup())
     except Exception as e:
-        logger.error(f"Get years failed: {e}")
+        logger.error(f"Get albums failed: {e}")
         await message.answer("Не удалось загрузить список альбомов. Попробуйте написать Мише.")
 
 
 async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
     data = await state.get_data()
-    year = data.get("year")
+    album_id = data.get("album_id")
     page = data.get("page", 1)
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Выбирай чо хошь", callback_data="album_menu"),
                 InlineKeyboardButton(text="❌ Не-не-не", callback_data="album_close"))
     error_markup = builder.as_markup()
+
     try:
-        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{year}",
+        response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{album_id}",
                                                 params={"page": page, "page_size": 1})
         response.raise_for_status()
         album_data = response.json()
@@ -65,7 +67,8 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         media_response.raise_for_status()
         media_bytes = media_response.content
         filename = object_name.split('/')[-1]
-        caption = f"Альбом {year} | Файл {current_page} из {total_pages}"
+        caption = f"Альбом {album_id} | Файл {current_page} из {total_pages}"
+
         builder = InlineKeyboardBuilder()
         nav_buttons = []
 
@@ -76,7 +79,7 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
             nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"album_page:{current_page + 1}"))
 
         builder.row(*nav_buttons)
-        builder.row(InlineKeyboardButton(text="Меню годов", callback_data="album_menu"),
+        builder.row(InlineKeyboardButton(text="Меню альбомов", callback_data="album_menu"),
                     InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
         input_file = BufferedInputFile(media_bytes, filename=filename)
         media_input = InputMediaPhoto(media=input_file) if media_type == "photo" else InputMediaVideo(media=input_file)
@@ -89,6 +92,7 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
 async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMContext):
     await query.answer()
     action, *value = query.data.split(":")
+
     if action == "album_close":
         await query.message.delete()
         await state.clear()
@@ -101,17 +105,17 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
     await state.set_state(AlbumBrowser.browsing)
     await state.update_data(message_id=query.message.message_id)
 
-    if action == "album_year":
-        year = int(value[0])
-        await state.update_data(year=year, page=1)
+    if action == "album_view":
+        album_id = value[0]
+        await state.update_data(album_id=album_id, page=1)
     elif action == "album_page":
         page = int(value[0])
         await state.update_data(page=page)
     elif action == "album_random":
         data = await state.get_data()
-        year = data.get("year")
+        album_id = data.get("album_id")
         try:
-            response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{year}/random")
+            response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/{album_id}/random")
             response.raise_for_status()
             random_data = response.json()
             new_page = random_data.get("page")
@@ -147,7 +151,7 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
                 else:
                     await query.message.answer_video(media_input.media.file, caption=caption, reply_markup=markup)
             except Exception as send_err:
-                 logger.error(f"Не удалось даже отправить новое сообщение: {send_err}")
+                logger.error(f"Не удалось даже отправить новое сообщение: {send_err}")
     else:
         try:
             await query.message.edit_text(caption, reply_markup=markup)

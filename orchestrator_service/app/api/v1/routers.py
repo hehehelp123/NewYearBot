@@ -58,18 +58,17 @@ async def handle_command(request: Request, command_path: str, payload: dict = Bo
     await kafka_producer.send(topic, payload)
     return {"status": "command_accepted", "topic": topic}
 
-
-@router.get("/albums/years")
-async def get_album_years():
+@router.get("/albums")
+async def get_albums():
     return storage_service.list_folders("photos/")
 
-@router.get("/albums/{year}")
+@router.get("/albums/{album_id}")
 async def get_album_media(
-    year: int,
+    album_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(1, ge=1, le=5)
 ):
-    folder = f"photos/{year}/"
+    folder = f"photos/{album_id}/"
     all_media = storage_service.list_media(folder)
 
     total_items = len(all_media)
@@ -90,9 +89,9 @@ async def get_album_media(
         "page": page
     }
 
-@router.get("/albums/{year}/random")
-async def get_random_album_media(year: int):
-    folder = f"photos/{year}/"
+@router.get("/albums/{album_id}/random")
+async def get_random_album_media(album_id: str):
+    folder = f"photos/{album_id}/"
     all_media = storage_service.list_media(folder)
 
     total_items = len(all_media)

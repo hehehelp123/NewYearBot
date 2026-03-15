@@ -16,13 +16,11 @@ from app.bot.constants import (
 
 logger = logging.getLogger(__name__)
 
-
 def escape_markdown(text: str) -> str:
     if not isinstance(text, str): return ""
     escape_chars = r"_*[]()~`>#+-=|{}.!"
     pattern = f"([{re.escape(escape_chars)}])"
     return re.sub(pattern, r"\\\1", text)
-
 
 def get_current_new_year() -> Optional[int]:
     now = datetime.now()
@@ -30,9 +28,8 @@ def get_current_new_year() -> Optional[int]:
     if now.month == 12: return now.year + 1
     return None
 
-
-def get_media_folder(year: int) -> str: return f"photos/{year}"
-
+def get_media_folder(album_id: str) -> str:
+    return f"photos/{album_id}"
 
 def get_schema_loader():
     schema_cache: Dict = {}
@@ -52,9 +49,7 @@ def get_schema_loader():
 
     return load_schema
 
-
 load_schema = get_schema_loader()
-
 
 async def get_root_items(user_id: int) -> List[str]:
     schema = await load_schema()
@@ -68,7 +63,6 @@ async def get_root_items(user_id: int) -> List[str]:
     ]
 
     return item_names
-
 
 async def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optional[Dict]:
     if not isinstance(node, dict): return None
@@ -97,7 +91,6 @@ async def find_item_by_name(target_name: str, node: Dict, user_id: int) -> Optio
                                 isinstance(item, dict) and item.get("kafka_topic") == "user.user.list_request"), None)
             return list_action
     return None
-
 
 async def reset_to_main_menu(message: Message, state: FSMContext, is_action_finish: bool = False):
     await state.clear()
