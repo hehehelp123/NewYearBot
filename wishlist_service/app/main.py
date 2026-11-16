@@ -60,8 +60,9 @@ async def lifespan(app: FastAPI):
     yield
 
     logging.info("Application lifespan shutdown...")
-    await kafka_producer.stop()
+    # сначала консьюмер: он отправляет LeaveGroup, и новый инстанс не ждёт ребалансировку
     await consumer.stop()
+    await kafka_producer.stop()
     logging.info("Kafka producer and consumer stopped.")
 
 app = FastAPI(

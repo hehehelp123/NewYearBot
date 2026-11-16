@@ -238,8 +238,11 @@ class KafkaConsumer:
             group_id="wishlist_service_group",
             auto_offset_reset='earliest',
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-            session_timeout_ms=300000,
-            heartbeat_interval_ms=10000
+            # было 300000: если процесс убивали без LeaveGroup, новый консьюмер ждал старый
+            # 5 минут, и всё это время сервис был unhealthy (а оркестратор не стартовал).
+            # Скрапинг идёт фоновыми задачами, цикл консьюмера не блокируется надолго.
+            session_timeout_ms=15000,
+            heartbeat_interval_ms=3000
         )
         await self.consumer.start()
         self.task = asyncio.create_task(self._consume())
