@@ -40,7 +40,8 @@ from app.handlers.wishlist import (
     all_wishlists_navigation_handler, wishlist_navigation_handler,
     wishlist_add_url_handler, process_manual_wishlist_name,
     process_manual_wishlist_cost, process_manual_wishlist_url,
-    process_manual_wishlist_confirm, booked_items_navigation_handler
+    process_manual_wishlist_confirm, booked_items_navigation_handler,
+    process_manual_wishlist_rename,
 )
 
 
@@ -107,6 +108,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dp.message.register(process_manual_wishlist_url, StateFilter(WishlistAddManual.waiting_for_url), F.text)
     dp.callback_query.register(process_manual_wishlist_confirm, StateFilter(WishlistAddManual.confirming),
                                F.data.startswith("wishlist_manual_confirm:"))
+    dp.callback_query.register(process_manual_wishlist_rename,
+                               StateFilter(WishlistAddManual.waiting_for_cost, WishlistAddManual.confirming),
+                               F.data == "wishlist_manual_rename")
 
     dp.message.register(start_handler, F.text == "/start")
     dp.message.register(back_to_welcome_handler, F.text == BACK_TO_WELCOME_BUTTON)

@@ -38,7 +38,8 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
         logger.info(f"User {user_id} sent text with URL: {message.text}")
         # Ссылку держим в FSM: callback_data в Telegram ограничена 64 байтами,
         # и длинные ссылки маркетплейсов туда не влезали — кнопки просто не отправлялись.
-        await state.update_data(pending_wishlist_url=url_match.group(0))
+        # весь текст, а не только ссылку: в тексте «Поделиться» обычно есть название товара
+        await state.update_data(pending_wishlist_url=message.text)
         builder = InlineKeyboardBuilder()
         builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_add_url:single")
         builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_add_url:infinite")

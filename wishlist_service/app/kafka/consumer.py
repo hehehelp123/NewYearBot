@@ -35,7 +35,8 @@ async def handle_wishlist_add_event(event_data: dict):
         async with AsyncSessionLocal() as session:
             asyncio.create_task(
                 WishlistService(session).add_to_wishlist(
-                    source_url_str, wishlist_request.telegram_id, is_infinitely_bookable
+                    source_url_str, wishlist_request.telegram_id, is_infinitely_bookable,
+                    source_text=wishlist_request.source_text,
                 )
             )
         logger.info(f"Scraping task for {source_url_str} has been scheduled.")

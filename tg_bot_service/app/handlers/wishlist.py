@@ -55,8 +55,28 @@ async def process_manual_wishlist_name(message: Message, state: FSMContext):
     if "manual_add_data" not in data: data["manual_add_data"] = {}
     data["manual_add_data"]["name"] = message.text
     await state.set_data(data)
+    if data.get("rename_then_confirm"):
+        # переименовали на шаге подтверждения — цену заново не спрашиваем
+        data.pop("rename_then_confirm", None)
+        await state.set_data(data)
+        await _ask_manual_confirm(message, state, data)
+        return
     await state.set_state(WishlistAddManual.waiting_for_cost)
     await message.answer("Теперь введи примерную цену (или 'пропустить'):")
+
+
+async def process_manual_wishlist_rename(query: CallbackQuery, state: FSMContext):
+    """Кнопка «Другое название» под черновиком названия из ссылки."""
+    await query.answer()
+    data = await state.get_data()
+    if "manual_add_data" not in data:
+        await query.message.edit_reply_markup(reply_markup=None)
+        return
+    data["rename_then_confirm"] = await state.get_state() == WishlistAddManual.confirming.state
+    await state.set_data(data)
+    await state.set_state(WishlistAddManual.waiting_for_name)
+    await query.message.edit_reply_markup(reply_markup=None)
+    await query.message.answer("Как назвать подарок?")
 
 
 async def process_manual_wishlist_cost(message: Message, state: FSMContext):
@@ -95,7 +115,9 @@ async def _ask_manual_confirm(message: Message, state: FSMContext, data: dict):
     builder = InlineKeyboardBuilder()
     builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_manual_confirm:single")
     builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_manual_confirm:infinite")
+    builder.button(text="✏️ Другое название", callback_data="wishlist_manual_rename")
     builder.button(text="❌ Отмена", callback_data="wishlist_manual_confirm:cancel")
+    builder.adjust(2, 1, 1)
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode=None)
 
 

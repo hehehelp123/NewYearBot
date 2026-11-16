@@ -129,13 +129,24 @@ class KafkaBotConsumer:
         logger.warning(f"Parse failed for user {telegram_id}, url {source_url}")
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
         reason = value.get("reason")
-        await ctx.set_state(WishlistAddManual.waiting_for_name)
-        await ctx.update_data(manual_add_data={"telegram_id": telegram_id, "item_url": source_url})
-        await self.bot.send_message(telegram_id,
-                                    f"Не смог вытащить инфу по ссылке 😥\n"
-                                    + (f"Причина: {reason}\n" if reason else "")
-                                    + f"\nДавай добавим руками, ссылку я сохраню.\n"
-                                    f"Как назвать подарок?", parse_mode=None)
+        suggested = value.get("suggested_name")
+        header = "Не смог вытащить инфу по ссылке 😥\n" + (f"Причина: {reason}\n" if reason else "")
+        if suggested:
+            await ctx.set_state(WishlistAddManual.waiting_for_cost)
+            await ctx.update_data(manual_add_data={"telegram_id": telegram_id, "item_url": source_url,
+                                                   "name": suggested})
+            builder = InlineKeyboardBuilder()
+            builder.button(text="✏️ Другое название", callback_data="wishlist_manual_rename")
+            await self.bot.send_message(telegram_id,
+                                        header + f"\nНазвание взял из ссылки:\n«{suggested}»\n\n"
+                                        f"Введи примерную цену (или 'пропустить'):",
+                                        reply_markup=builder.as_markup(), parse_mode=None)
+        else:
+            await ctx.set_state(WishlistAddManual.waiting_for_name)
+            await ctx.update_data(manual_add_data={"telegram_id": telegram_id, "item_url": source_url})
+            await self.bot.send_message(telegram_id,
+                                        header + "\nДавай добавим руками, ссылку я сохраню.\nКак назвать подарок?",
+                                        parse_mode=None)
 
     async def _handle_all_wishlists_view(self, value: dict):
         requester_id = value.get("telegram_id")

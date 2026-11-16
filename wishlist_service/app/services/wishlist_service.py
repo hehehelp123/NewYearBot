@@ -16,6 +16,7 @@ from app.schemas.wishlist_schemas import (
 )
 from app.kafka.producer import kafka_producer
 from app.services.scraper_service import scraper_service
+from app.utils.name_hints import name_from_share_text, name_from_url
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -80,15 +81,21 @@ class WishlistService:
 
         return db_wishlist
 
-    async def add_to_wishlist(self, source_url: str, user_id: int, is_infinitely_bookable: bool = False):
+    async def add_to_wishlist(self, source_url: str, user_id: int, is_infinitely_bookable: bool = False,
+                              source_text: str | None = None):
         logger.info(f"Starting background task to add item from {source_url} for user {user_id}")
         downloaded_data = await scraper_service.parse_url(source_url, user_id)
 
         if not downloaded_data or downloaded_data.get('error') or not downloaded_data.get('name'):
             reason = (downloaded_data or {}).get('error') or "не удалось разобрать страницу товара"
-            logger.error(f"Background task: Failed to parse item data from {source_url} for user {user_id}: {reason}")
+            # Черновик названия: из текста «Поделиться» (там обычно есть название), иначе из самой ссылки
+            suggested = name_from_share_text(source_text, source_url) or name_from_url(source_url)
+            logger.error(f"Background task: Failed to parse item data from {source_url} for user {user_id}: "
+                         f"{reason}; suggested name: {suggested!r}")
             await kafka_producer.send("wishlist.item.parse_failed",
-                                      {"telegram_id": user_id, "source_url": source_url, "reason": reason})
+                                      {"telegram_id": user_id, "source_url": source_url, "reason": reason,
+                                       "suggested_name": suggested,
+                                       "is_infinitely_bookable": is_infinitely_bookable})
             return
 
         logger.info(f"Data parsed successfully: {downloaded_data.get('name')}")
