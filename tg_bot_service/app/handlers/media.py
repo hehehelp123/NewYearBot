@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from aiogram import Bot
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
@@ -122,15 +123,64 @@ async def media_upload_handler(message: Message, bot: Bot, state: FSMContext):
         original_filename = f"{message.from_user.id}_{file_unique_id}.{content_type.split('/')[-1]}"
 
     logger.debug(f"Got media {file_unique_id} from {message.from_user.id}")
-    await message.answer(f"Украдываю (ID: ...{file_unique_id[-6:]})...")
+    size = getattr(media, "file_size", None) or 0
+    if size > TELEGRAM_DOWNLOAD_LIMIT:
+        # Bot API не отдаёт ботам файлы больше 20 МБ — честно говорим об этом
+        await _report(message, ok=False, reason=f"файл {size // (1024 * 1024)} МБ — Telegram не даёт ботам скачивать больше 20 МБ")
+        return
     try:
         file_info = await bot.get_file(file_id)
-        file_bytes_io = await bot.download_file(file_info.file_path)
+        file_bytes_io = await bot.download_file(file_info.file_path, timeout=120)
         folder = get_media_folder(album_id)
-        object_name = storage_service.upload_file(file_bytes_io.read(), original_filename, folder=folder,
-                                                  content_type=content_type)
+        # MinIO-клиент синхронный: в отдельном потоке, чтобы не морозить бота для всех остальных
+        object_name = await asyncio.to_thread(storage_service.upload_file, file_bytes_io.getvalue(),
+                                              original_filename, folder, content_type)
         logger.info(f"Uploaded {object_name} to {folder}")
-        await message.answer(f"✅ Файл ...{file_unique_id[-6:]} национализирован!")
+        await _report(message, ok=True)
     except Exception as e:
         logger.error(f"Upload error {file_unique_id}: {e}", exc_info=True)
-        await message.answer(f"❌ Што ты наделал ...{file_unique_id[-6:]}.")
+        await _report(message, ok=False, reason="не смог сохранить")
+
+
+TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024
+_GROUP_DEBOUNCE_SECONDS = 2.5
+_groups: dict[str, dict] = {}
+
+
+async def _report(message: Message, ok: bool, reason: str | None = None):
+    """Одиночное фото — один ответ. Альбом из N фото — один итоговый ответ, а не 2N сообщений
+    (раньше бот упирался в лимиты Telegram на отправку и «пролагивал»)."""
+    group_id = message.media_group_id
+    if not group_id:
+        if ok:
+            await message.answer("✅ Национализировано!")
+        else:
+            await message.answer(f"❌ Што ты наделал: {reason}.")
+        return
+
+    g = _groups.setdefault(group_id, {"ok": 0, "failed": [], "task": None})
+    if ok:
+        g["ok"] += 1
+    else:
+        g["failed"].append(reason)
+    if g["task"]:
+        g["task"].cancel()
+    g["task"] = asyncio.create_task(_flush_group(message, group_id))
+
+
+async def _flush_group(message: Message, group_id: str):
+    try:
+        await asyncio.sleep(_GROUP_DEBOUNCE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    g = _groups.pop(group_id, None)
+    if not g:
+        return
+    text = f"✅ Национализировано файлов: {g['ok']}"
+    if g["failed"]:
+        reasons = "; ".join(sorted(set(r for r in g["failed"] if r)))
+        text += f"\n❌ Не вышло: {len(g['failed'])} ({reasons})"
+    try:
+        await message.answer(text)
+    except Exception as e:
+        logger.error(f"Group report failed: {e}")

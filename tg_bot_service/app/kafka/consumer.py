@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import re
@@ -127,15 +128,14 @@ class KafkaBotConsumer:
             return
         logger.warning(f"Parse failed for user {telegram_id}, url {source_url}")
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
-        prefilled_name = f"Примерно как по ссылке {source_url}"
-        await ctx.set_state(WishlistAddManual.waiting_for_cost)
-        await ctx.update_data(manual_add_data={
-            "telegram_id": telegram_id, "name": prefilled_name, "item_url": source_url
-        })
+        reason = value.get("reason")
+        await ctx.set_state(WishlistAddManual.waiting_for_name)
+        await ctx.update_data(manual_add_data={"telegram_id": telegram_id, "item_url": source_url})
         await self.bot.send_message(telegram_id,
-                                    f"Не смог спарсить инфу по ссылке. 😥\n"
-                                    f"Давай добавим руками. Я заполнил название:\n{prefilled_name}\n\n"
-                                    f"Введи примерную цену (или 'пропустить'):", parse_mode=None)
+                                    f"Не смог вытащить инфу по ссылке 😥\n"
+                                    + (f"Причина: {reason}\n" if reason else "")
+                                    + f"\nДавай добавим руками, ссылку я сохраню.\n"
+                                    f"Как назвать подарок?", parse_mode=None)
 
     async def _handle_all_wishlists_view(self, value: dict):
         requester_id = value.get("telegram_id")
@@ -263,19 +263,29 @@ class KafkaBotConsumer:
                     logger.warning(f"Could not parse date string '{dt_str}': {e}")
                     return "н/д"
 
+            def esc(v):
+                return html.escape(str(v)) if v else "н/д"
+
+            number = ticket.get('train_number')
+            is_flight = not ticket.get('wagon_number') and bool(re.fullmatch(r"[A-Z0-9]{2} ?\d{2,4}", number or ""))
+            if is_flight:
+                trip = f"Рейс: <b>{esc(number)}</b>"
+                if ticket.get('seat_number'):
+                    trip += f" | Место: <b>{esc(ticket.get('seat_number'))}</b>"
+            else:
+                trip = (f"Поезд: <b>{esc(number)}</b> | Вагон: <b>{esc(ticket.get('wagon_number'))}</b> | "
+                        f"Место: <b>{esc(ticket.get('seat_number'))}</b>")
             text = (
-                f"*{ticket['title']}*\n\n"
-                f"Пассажир: *{ticket.get('passenger_name') or 'н/д'}*\n"
-                f"Поезд: *{ticket.get('train_number') or 'н/д'}* | "
-                f"Вагон: *{ticket.get('wagon_number') or 'н/д'}* | "
-                f"Место: *{ticket.get('seat_number') or 'н/д'}*\n\n"
-                f"📍 *Отправление:* {ticket.get('departure_station') or 'н/д'}\n"
+                f"<b>{esc(ticket.get('title'))}</b>\n\n"
+                f"Пассажир: <b>{esc(ticket.get('passenger_name'))}</b>\n"
+                f"{trip}\n\n"
+                f"📍 <b>Отправление:</b> {esc(ticket.get('departure_station'))}\n"
                 f"   {format_dt(ticket.get('departure_datetime'))}\n"
-                f"🏁 *Прибытие:* {ticket.get('arrival_station') or 'н/д'}\n"
+                f"🏁 <b>Прибытие:</b> {esc(ticket.get('arrival_station'))}\n"
                 f"   {format_dt(ticket.get('arrival_datetime'))}"
             )
             try:
-                await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await self.bot.send_message(chat_id, text, reply_markup=builder.as_markup(), parse_mode="HTML")
             except Exception as e:
                 logger.error(f"Failed to send ticket info: {e}")
 

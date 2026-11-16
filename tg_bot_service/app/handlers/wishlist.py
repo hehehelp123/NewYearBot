@@ -18,12 +18,19 @@ logger = logging.getLogger(__name__)
 async def wishlist_add_url_handler(query: CallbackQuery, state: FSMContext):
     await query.answer()
     action, booking_type, *text_parts = query.data.split(":", 2)
+    data = await state.get_data()
 
     if booking_type == "cancel":
+        await state.update_data(pending_wishlist_url=None)
         await query.message.edit_text("Отменено.")
         return
 
-    source_text = ":".join(text_parts)
+    # Новые кнопки несут ссылку в FSM; старые (ещё висящие в чатах) — в самой callback_data
+    source_text = ":".join(text_parts) or data.get("pending_wishlist_url")
+    if not source_text:
+        await query.message.edit_text("Не нашёл ссылку — пришли её ещё раз.")
+        return
+    await state.update_data(pending_wishlist_url=None)
     is_infinitely_bookable = (booking_type == "infinite")
 
     payload = {
@@ -58,6 +65,10 @@ async def process_manual_wishlist_cost(message: Message, state: FSMContext):
     if message.text and message.text.lower() != 'пропустить':
         data["manual_add_data"]["cost"] = message.text
     await state.set_data(data)
+    if data["manual_add_data"].get("item_url"):
+        # ссылка уже есть (пришли сюда после неудачного парсинга) — второй раз не спрашиваем
+        await _ask_manual_confirm(message, state, data)
+        return
     await state.set_state(WishlistAddManual.waiting_for_url)
     await message.answer("Добавь ссылку (или 'пропустить'):")
 
@@ -69,6 +80,10 @@ async def process_manual_wishlist_url(message: Message, state: FSMContext):
         data["manual_add_data"]["item_url"] = message.text
 
     await state.set_data(data)
+    await _ask_manual_confirm(message, state, data)
+
+
+async def _ask_manual_confirm(message: Message, state: FSMContext, data: dict):
     await state.set_state(WishlistAddManual.confirming)
 
     item = data.get("manual_add_data", {})

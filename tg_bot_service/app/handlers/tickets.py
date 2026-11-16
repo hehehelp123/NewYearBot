@@ -1,3 +1,4 @@
+import html
 import logging
 from aiogram import Bot
 from aiogram.types import CallbackQuery
@@ -24,8 +25,9 @@ async def tickets_callback_handler(query: CallbackQuery, bot: Bot, state: FSMCon
         builder = InlineKeyboardBuilder()
         builder.button(text="Да, нахер билеты", callback_data=f"confirm_delete:{ticket_id}")
         builder.button(text="Не, погодь", callback_data=f"cancel_delete:{ticket_id}")
-        await query.message.edit_text(f"Ты че, решил не приезжать с **{query.message.text.splitlines()[0]}**?",
-                                      reply_markup=builder.as_markup(), parse_mode="MarkdownV2")
+        title = query.message.text.splitlines()[0] if query.message.text else "этим билетом"
+        await query.message.edit_text(f"Ты че, решил не приезжать с <b>{html.escape(title)}</b>?",
+                                      reply_markup=builder.as_markup(), parse_mode="HTML")
         await query.answer()
     elif action == "confirm_delete":
         await query.answer("Очистка!..")

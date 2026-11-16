@@ -2,7 +2,8 @@ import logging
 import tempfile
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -10,7 +11,7 @@ from app.kafka.producer import kafka_producer
 from app.models.ticket_models import Ticket
 from app.schemas.ticket_schemas import TicketCreate
 from app.services.storage_service import storage_service
-from app.services.pdf_parser import parse_rzd_ticket
+from app.services.pdf_parser import parse_ticket, DEFAULT_UTC_OFFSET
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,13 @@ class TicketService:
                 select(Ticket)
                 .where(
                     Ticket.requester_user_id == telegram_id,
-                    Ticket.departure_datetime >= datetime.utcnow()
+                    # даты в билетах — местное (МСК) время; нераспознанные билеты тоже показываем
+                    or_(
+                        Ticket.departure_datetime.is_(None),
+                        Ticket.departure_datetime >= datetime.utcnow() + timedelta(hours=DEFAULT_UTC_OFFSET),
+                    ),
                 )
-                .order_by(Ticket.departure_datetime.asc())
+                .order_by(Ticket.departure_datetime.asc().nulls_last())
             )
             result = await self.db_session.execute(query)
             tickets = result.scalars().all()
@@ -134,7 +139,8 @@ class TicketService:
             storage_service.download_file_to_path(storage_key, tmp_path)
 
             with open(tmp_path, "rb") as f:
-                parsed_data = parse_rzd_ticket(f)
+                parsed_data, parse_meta = parse_ticket(f)
+            logger.info(f"Parsed ticket ({parse_meta}): {parsed_data}")
 
             ticket_data = TicketCreate(requester_user_id=telegram_id, title=title)
             db_ticket = Ticket(
@@ -160,6 +166,8 @@ class TicketService:
                 "arrival_station": db_ticket.arrival_station,
                 "arrival_datetime": db_ticket.arrival_datetime.isoformat() if db_ticket.arrival_datetime else None,
                 "storage_key": db_ticket.storage_key,
+                "transport": parse_meta.get("transport"),
+                "utc_offset": parse_meta.get("utc_offset", DEFAULT_UTC_OFFSET),
             }
             await kafka_producer.send("ticket.created", ticket_payload)
 

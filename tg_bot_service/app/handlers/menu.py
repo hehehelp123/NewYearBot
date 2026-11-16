@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Dict
@@ -35,9 +36,12 @@ async def menu_handler(message: Message, state: FSMContext) -> None:
     url_match = re.search(r'https?://[^\s/$.?#].[^\s]*', message.text)
     if url_match:
         logger.info(f"User {user_id} sent text with URL: {message.text}")
+        # Ссылку держим в FSM: callback_data в Telegram ограничена 64 байтами,
+        # и длинные ссылки маркетплейсов туда не влезали — кнопки просто не отправлялись.
+        await state.update_data(pending_wishlist_url=url_match.group(0))
         builder = InlineKeyboardBuilder()
-        builder.button(text="🎁 Обычный (1 бронь)", callback_data=f"wishlist_add_url:single:{message.text}")
-        builder.button(text="♾️ Общий (много броней)", callback_data=f"wishlist_add_url:infinite:{message.text}")
+        builder.button(text="🎁 Обычный (1 бронь)", callback_data="wishlist_add_url:single")
+        builder.button(text="♾️ Общий (много броней)", callback_data="wishlist_add_url:infinite")
         builder.button(text="❌ Отмена", callback_data="wishlist_add_url:cancel")
         builder.adjust(2, 1)
         await message.answer(
@@ -144,8 +148,8 @@ async def process_action_field(message: Message, state: FSMContext, bot: Bot):
         file_info = await bot.get_file(doc.file_id)
         file_bytes = await bot.download_file(file_info.file_path)
         try:
-            input_value = storage_service.upload_file(file_bytes.read(), doc.file_name, folder="tickets",
-                                                      content_type=doc.mime_type or "application/pdf")
+            input_value = await asyncio.to_thread(storage_service.upload_file, file_bytes.read(), doc.file_name,
+                                                  "tickets", doc.mime_type or "application/pdf")
             await message.answer("Файлик успешно национализирован.")
             logger.info(f"Uploaded {input_value}")
         except Exception as e:

@@ -59,11 +59,11 @@ async def handle_command(request: Request, command_path: str, payload: dict = Bo
     return {"status": "command_accepted", "topic": topic}
 
 @router.get("/albums")
-async def get_albums():
+def get_albums():  # sync: MinIO-клиент блокирующий, FastAPI выполнит в threadpool
     return storage_service.list_folders("photos/")
 
 @router.get("/albums/{album_id}")
-async def get_album_media(
+def get_album_media(
     album_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(1, ge=1, le=5)
@@ -90,7 +90,7 @@ async def get_album_media(
     }
 
 @router.get("/albums/{album_id}/random")
-async def get_random_album_media(album_id: str):
+def get_random_album_media(album_id: str):
     folder = f"photos/{album_id}/"
     all_media = storage_service.list_media(folder)
 
@@ -105,7 +105,7 @@ async def get_random_album_media(album_id: str):
     }
 
 @router.get("/albums/media/{object_name:path}")
-async def download_album_media(object_name: str):
+def download_album_media(object_name: str):
     file_bytes, content_type = storage_service.download_file_as_bytes(object_name)
     if file_bytes is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media file not found in storage.")

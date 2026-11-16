@@ -12,6 +12,9 @@ from app.bot.states import AlbumBrowser
 
 logger = logging.getLogger(__name__)
 
+# object_name -> file_id в Telegram: повторный показ того же фото не гоняет байты MinIO -> оркестратор -> бот -> Telegram
+_tg_file_ids: dict[str, str] = {}
+
 
 async def start_album_view_handler(message: Message, state: FSMContext):
     logger.debug(f"{message.from_user.id} requests albums.")
@@ -63,11 +66,15 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         object_name = item.get("object_name")
         media_type = item.get("type", "photo")
 
-        media_response = await http_client.client.get(f"{settings.ORCHESTRATOR_URL}/api/v1/albums/media/{object_name}")
-        media_response.raise_for_status()
-        media_bytes = media_response.content
-        filename = object_name.split('/')[-1]
         caption = f"Альбом {album_id} | Файл {current_page} из {total_pages}"
+        cached_file_id = _tg_file_ids.get(object_name)
+        if not cached_file_id:
+            media_response = await http_client.client.get(
+                f"{settings.ORCHESTRATOR_URL}/api/v1/albums/media/{object_name}")
+            media_response.raise_for_status()
+            media_bytes = media_response.content
+        filename = object_name.split('/')[-1]
+        await state.update_data(current_object=object_name)
 
         builder = InlineKeyboardBuilder()
         nav_buttons = []
@@ -81,8 +88,9 @@ async def build_album_page(state: FSMContext, bot: Bot, chat_id: int):
         builder.row(*nav_buttons)
         builder.row(InlineKeyboardButton(text="Меню альбомов", callback_data="album_menu"),
                     InlineKeyboardButton(text="❌ Закрыть", callback_data="album_close"))
-        input_file = BufferedInputFile(media_bytes, filename=filename)
-        media_input = InputMediaPhoto(media=input_file) if media_type == "photo" else InputMediaVideo(media=input_file)
+        input_file = cached_file_id or BufferedInputFile(media_bytes, filename=filename)
+        media_cls = InputMediaPhoto if media_type == "photo" else InputMediaVideo
+        media_input = media_cls(media=input_file, caption=caption)
         return caption, builder.as_markup(), media_input, current_page
     except Exception as e:
         logger.error(f"Build page error: {e}")
@@ -130,10 +138,9 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
     if media_input:
         await state.update_data(page=new_page)
         try:
-            await bot.edit_message_media(media=media_input, chat_id=query.message.chat.id,
-                                         message_id=query.message.message_id, reply_markup=markup)
-            await bot.edit_message_caption(chat_id=query.message.chat.id, message_id=query.message.message_id,
-                                           caption=caption, reply_markup=markup)
+            edited = await bot.edit_message_media(media=media_input, chat_id=query.message.chat.id,
+                                                  message_id=query.message.message_id, reply_markup=markup)
+            await _remember_file_id_async(state, edited)
         except TelegramBadRequest as e:
             if "not modified" in str(e):
                 pass
@@ -146,10 +153,12 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
                 logger.error(f"Edit media/caption error: {e}")
             try:
                 await query.message.answer("Не удалось обновить предыдущее сообщение, показываю текущий файл.")
+                media = media_input.media
                 if isinstance(media_input, InputMediaPhoto):
-                    await query.message.answer_photo(media_input.media.file, caption=caption, reply_markup=markup)
+                    sent = await query.message.answer_photo(media, caption=caption, reply_markup=markup)
                 else:
-                    await query.message.answer_video(media_input.media.file, caption=caption, reply_markup=markup)
+                    sent = await query.message.answer_video(media, caption=caption, reply_markup=markup)
+                await _remember_file_id_async(state, sent)
             except Exception as send_err:
                 logger.error(f"Не удалось даже отправить новое сообщение: {send_err}")
     else:
@@ -157,3 +166,11 @@ async def album_navigation_handler(query: CallbackQuery, bot: Bot, state: FSMCon
             await query.message.edit_text(caption, reply_markup=markup)
         except TelegramBadRequest as e:
             if "not modified" not in str(e): logger.error(f"Edit text error: {e}")
+
+async def _remember_file_id_async(state: FSMContext, msg):
+    if not isinstance(msg, Message):
+        return
+    object_name = (await state.get_data()).get("current_object")
+    file_id = (msg.photo[-1].file_id if msg.photo else msg.video.file_id if msg.video else None)
+    if object_name and file_id:
+        _tg_file_ids[object_name] = file_id

@@ -19,6 +19,28 @@ def escape_markdown(text: str) -> str:
     return re.sub(f"({escape_chars})", r"\\\1", text)
 
 
+def _is_flight(ticket: dict) -> bool:
+    if ticket.get("transport"):
+        return ticket["transport"] == "flight"
+    return not ticket.get("wagon_number") and bool(re.fullmatch(r"[A-Z0-9]{2} ?\d{2,4}", ticket.get("train_number") or ""))
+
+
+def _trip_line(ticket: dict) -> str:
+    """«Поезд 347АА, вагон 11, место 026» / «Рейс SU 1347» — только известные части, уже экранировано."""
+    number = ticket.get("train_number")
+    if _is_flight(ticket):
+        parts = [f"Рейс {number}"] if number else []
+        if ticket.get("seat_number"):
+            parts.append(f"место {ticket['seat_number']}")
+    else:
+        parts = [f"Поезд {number}"] if number else []
+        if ticket.get("wagon_number"):
+            parts.append(f"вагон {ticket['wagon_number']}")
+        if ticket.get("seat_number"):
+            parts.append(f"место {ticket['seat_number']}")
+    return escape_markdown(", ".join(parts))
+
+
 class NotificationService:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
@@ -101,51 +123,69 @@ class NotificationService:
             await self._send_immediate(chat_id, message)
 
     async def _handle_ticket_created(self, ticket: dict):
+        """Подтверждение + напоминания. Даты в билете — местное время, планировщик работает в UTC."""
         user_id = ticket["telegram_id"]
-        confirmation_message = "✅ *Билет успешно добавлен\\!*\n\n"
-        reminders_info = ""
+        offset = timedelta(hours=int(ticket.get("utc_offset") or 3))
 
         def parse_dt(dt_str):
             return datetime.fromisoformat(dt_str) if dt_str else None
 
         def format_dt(dt):
-            return escape_markdown(dt.strftime('%d.%m.%Y в %H:%M')) if dt else "Не найдено"
+            return escape_markdown(dt.strftime('%d.%m.%Y в %H:%M')) if dt else "не распознано"
 
-        departure_datetime = parse_dt(ticket.get("departure_datetime"))
-        arrival_datetime = parse_dt(ticket.get("arrival_datetime"))
+        departure_local = parse_dt(ticket.get("departure_datetime"))
+        arrival_local = parse_dt(ticket.get("arrival_datetime"))
 
-        confirmation_message += f"*Отправление:* {escape_markdown(ticket.get('departure_station', ''))}\n"
-        confirmation_message += f"*Дата:* {format_dt(departure_datetime)}\n\n"
-        confirmation_message += f"*Прибытие:* {escape_markdown(ticket.get('arrival_station', ''))}\n"
-        confirmation_message += f"*Дата:* {format_dt(arrival_datetime)}\n"
+        lines = ["✅ *Билет добавлен\\!*", ""]
+        trip = _trip_line(ticket)
+        if trip:
+            lines += [trip, ""]
+        lines.append(f"*Отправление:* {escape_markdown(ticket.get('departure_station') or 'не распознано')}")
+        lines.append(f"*Когда:* {format_dt(departure_local)}")
+        lines.append("")
+        lines.append(f"*Прибытие:* {escape_markdown(ticket.get('arrival_station') or 'не распознано')}")
+        lines.append(f"*Когда:* {format_dt(arrival_local)}")
+        await self._send_immediate(user_id, "\n".join(lines))
 
-        await self._send_immediate(user_id, confirmation_message)
-
-        if not departure_datetime:
+        if not departure_local:
+            await self._send_immediate(
+                user_id,
+                "⚠️ Не смог распознать дату отправления в этом PDF, поэтому напоминаний не будет\\. "
+                "Сам билет сохранён — его можно скачать из списка билетов\\."
+            )
             return
 
-        all_recipients = [user_id] + settings.ADMIN_TELEGRAM_IDS
-        reminder_dates = []
+        now_utc = datetime.utcnow()
+        departure_utc = departure_local - offset
+        if departure_utc <= now_utc:
+            await self._send_immediate(user_id, "ℹ️ Эта поездка уже в прошлом, напоминания не ставлю\\.")
+            return
 
+        all_recipients = list(dict.fromkeys([user_id] + list(settings.ADMIN_TELEGRAM_IDS)))
+        reminder_days = []
         for days in [3, 1]:
-            reminder_dt = departure_datetime - timedelta(days=days)
-            if reminder_dt > datetime.utcnow():
-                reminder_dates.append(reminder_dt)
+            remind_utc = departure_utc - timedelta(days=days)
+            if remind_utc > now_utc:
+                reminder_days.append(departure_local - timedelta(days=days))
                 time_left = f"{days} дня" if days > 1 else "1 день"
                 for recipient_id in all_recipients:
-                    await self._schedule_text_reminder(recipient_id, ticket, reminder_dt, time_left)
+                    await self._schedule_text_reminder(recipient_id, ticket, remind_utc, departure_local, time_left)
 
-        if reminder_dates:
-            formatted_dates = ", ".join([d.strftime('%d.%m.%Y') for d in sorted(reminder_dates)])
-            reminders_info = f"\n🔔 Напоминания для вас и администраторов запланированы на: *{escape_markdown(formatted_dates)}*\\."
-
+        # PDF в день поездки: в 08:00 по местному времени, но не позже чем за 2 часа до отправления
+        doc_local = departure_local.replace(hour=8, minute=0, second=0, microsecond=0)
+        if departure_local - doc_local < timedelta(hours=2):
+            doc_local = departure_local - timedelta(hours=2)
+        doc_utc = max(doc_local - offset, now_utc)
         for recipient_id in all_recipients:
-            await self._schedule_document_reminder(recipient_id, ticket, departure_datetime)
+            await self._schedule_document_reminder(recipient_id, ticket, doc_utc, departure_local)
 
-        dep_date_str = departure_datetime.strftime('%d.%m.%Y')
-        reminders_info += f"\n📄 Сам билет будет отправлен вам и администраторам в день отправления: *{escape_markdown(dep_date_str)}*\\."
-
-        await self._send_immediate(user_id, reminders_info)
+        info = []
+        if reminder_days:
+            dates = ", ".join(d.strftime('%d.%m') for d in sorted(reminder_days))
+            info.append(f"🔔 Напоминания тебе и админам: *{escape_markdown(dates)}*\\.")
+        doc_when = (doc_utc + offset).strftime('%d.%m в %H:%M')
+        info.append(f"📄 PDF билета пришлю *{escape_markdown(doc_when)}*\\.")
+        await self._send_immediate(user_id, "\n".join(info))
 
     async def _handle_ticket_list(self, data: dict):
         user_id = data.get("telegram_id")
@@ -172,30 +212,33 @@ class NotificationService:
             unbooker_message = f"✅ Вы сняли бронь с товара '*__{item_name}__*'\\."
             await self._send_immediate(unbooker_id, unbooker_message)
 
-    async def _schedule_text_reminder(self, user_id: int, ticket: dict, send_at: datetime, time_left: str):
+    async def _schedule_text_reminder(self, user_id: int, ticket: dict, send_at_utc: datetime,
+                                      departure_local: datetime, time_left: str):
         message = (
             f"❗️ Напоминание о поездке: *{escape_markdown(ticket['title'])}*\n"
-            f"Пассажир: {escape_markdown(ticket.get('passenger_name', 'н/д'))}\n"
-            f"Поезд {escape_markdown(ticket.get('train_number', 'н/д'))}, вагон {escape_markdown(ticket.get('wagon_number', 'н/д'))}, место {escape_markdown(ticket.get('seat_number', 'н/д'))}\n"
-            f"Отправление: {escape_markdown(ticket.get('departure_station', 'н/д'))} в {escape_markdown(send_at.strftime('%H:%M'))}\n"
+            f"Пассажир: {escape_markdown(ticket.get('passenger_name') or 'н/д')}\n"
+            f"{_trip_line(ticket) or ''}\n"
+            f"Отправление: {escape_markdown(ticket.get('departure_station') or 'н/д')} "
+            f"{escape_markdown(departure_local.strftime('%d.%m в %H:%M'))}\n"
             f"До отправления — *{escape_markdown(time_left)}*\\."
         )
-        await self._create_scheduled_text({"telegram_id": user_id, "message": message, "send_at": send_at.isoformat()})
+        await self._create_scheduled_text({"telegram_id": user_id, "message": message, "send_at": send_at_utc.isoformat()})
 
-    async def _schedule_document_reminder(self, user_id: int, ticket: dict, send_at: datetime):
-        dep_time_str = send_at.strftime('%H:%M') if send_at else 'н/д'
+    async def _schedule_document_reminder(self, user_id: int, ticket: dict, send_at_utc: datetime,
+                                          departure_local: datetime):
+        icon = "✈️" if _is_flight(ticket) else "🚆"
         caption = (
-            f"🚆 *Ваш билет на сегодня: {escape_markdown(ticket['title'])}*\n"
-            f"Пассажир: {escape_markdown(ticket.get('passenger_name', 'н/д'))}\n"
-            f"Поезд {escape_markdown(ticket.get('train_number', 'н/д'))}, вагон {escape_markdown(ticket.get('wagon_number', 'н/д'))}, место {escape_markdown(ticket.get('seat_number', 'н/д'))}\n"
-            f"Отправление: {escape_markdown(ticket.get('departure_station', 'н/д'))}\n"
-            f"Время: {escape_markdown(dep_time_str)}"
+            f"{icon} *Билет на сегодня: {escape_markdown(ticket['title'])}*\n"
+            f"Пассажир: {escape_markdown(ticket.get('passenger_name') or 'н/д')}\n"
+            f"{_trip_line(ticket) or ''}\n"
+            f"Отправление: {escape_markdown(ticket.get('departure_station') or 'н/д')}\n"
+            f"Время: {escape_markdown(departure_local.strftime('%H:%M'))}"
         )
         payload = {
             "telegram_id": user_id,
             "storage_key": ticket["storage_key"],
             "caption": caption,
-            "send_at": send_at.isoformat()
+            "send_at": send_at_utc.isoformat()
         }
         await self._create_scheduled_document(payload)
 

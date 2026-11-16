@@ -84,11 +84,11 @@ class WishlistService:
         logger.info(f"Starting background task to add item from {source_url} for user {user_id}")
         downloaded_data = await scraper_service.parse_url(source_url, user_id)
 
-        if not downloaded_data or not downloaded_data.get('name'):
-            logger.error(f"Background task: Failed to parse item data from {source_url} for user {user_id}")
+        if not downloaded_data or downloaded_data.get('error') or not downloaded_data.get('name'):
+            reason = (downloaded_data or {}).get('error') or "не удалось разобрать страницу товара"
+            logger.error(f"Background task: Failed to parse item data from {source_url} for user {user_id}: {reason}")
             await kafka_producer.send("wishlist.item.parse_failed",
-                                      {"telegram_id": user_id, "source_url": source_url,
-                                       "reason": "Failed to parse item data. The website structure might have changed."})
+                                      {"telegram_id": user_id, "source_url": source_url, "reason": reason})
             return
 
         logger.info(f"Data parsed successfully: {downloaded_data.get('name')}")
