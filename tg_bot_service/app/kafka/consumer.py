@@ -26,8 +26,10 @@ from app.bot.states import (
     WishlistAddManual,
     BookedItemsBrowser
 )
-from app.bot.utils import escape_markdown
-from app.bot.constants import CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON
+from app.bot.utils import escape_markdown, get_root_items, load_schema
+from app.bot.keyboards import build_menu_keyboard
+from app.bot.constants import (CLOSE_WISHLIST_BUTTON, CLOSE_BOOKED_BUTTON,
+                               UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,18 @@ class KafkaBotConsumer:
         self.storage = dp.storage
         self.consumer: AIOKafkaConsumer | None = None
         self._task = None
+
+    async def _send_with_main_menu(self, telegram_id: int, text: str):
+        """Сообщение + корневое меню. Нужно там, где мы сбрасываем FSM, а на экране
+        осталось подменю (например, «Просмотреть вишлисты» — unfinished-действие):
+        без этого видимые кнопки подменю ищутся в корне и бот их «не находит»."""
+        ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
+        await ctx.clear()
+        item_names = await get_root_items(telegram_id)
+        item_names.extend([UPLOAD_MEDIA_BUTTON, VIEW_ALBUMS_BUTTON])
+        await ctx.update_data(current_node=await load_schema())
+        kb = build_menu_keyboard(item_names, add_start=False, add_back_to_welcome=True)
+        await self.bot.send_message(telegram_id, text, reply_markup=kb)
 
     async def start(self):
         loop = asyncio.get_event_loop()
@@ -161,8 +175,7 @@ class KafkaBotConsumer:
 
         if not owner_ids:
             logger.info(f"No owner IDs found for {requester_id}. Sending message and clearing state.")
-            await self.bot.send_message(requester_id, "Пока никто не создал вишлист.")
-            await ctx.clear()
+            await self._send_with_main_menu(requester_id, "Пока никто не создал вишлист.")
             return
 
         builder = InlineKeyboardBuilder()
@@ -310,8 +323,9 @@ class KafkaBotConsumer:
             return
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
         if not items:
-            await self.bot.send_message(telegram_id, "Этот саботажник ничего не добавил.")
-            await ctx.clear()
+            text = ("Твой вишлист пока пуст." if str(owner_user_id) == str(telegram_id)
+                    else "Этот саботажник ничего не добавил.")
+            await self._send_with_main_menu(telegram_id, text)
             return
         await ctx.set_state(WishlistBrowser.browsing)
         await ctx.set_data({
@@ -367,8 +381,7 @@ class KafkaBotConsumer:
         ctx = FSMContext(self.storage, key=StorageKey(bot_id=self.bot.id, user_id=telegram_id, chat_id=telegram_id))
 
         if not booked_items:
-            await self.bot.send_message(telegram_id, "Ты пока ничего не забронировал.")
-            await ctx.clear()
+            await self._send_with_main_menu(telegram_id, "Ты пока ничего не забронировал.")
             return
 
         await ctx.set_state(BookedItemsBrowser.browsing)
