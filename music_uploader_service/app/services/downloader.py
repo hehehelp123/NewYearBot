@@ -16,6 +16,9 @@ MAX_PLAYLIST_ITEMS = 25
 
 
 class YtdlpLogger:
+    def __init__(self):
+        self.errors: list[str] = []
+
     def debug(self, msg):
         if "[debug]" in msg:
             logger.debug(msg)
@@ -27,6 +30,7 @@ class YtdlpLogger:
 
     def error(self, msg):
         logger.error(msg)
+        self.errors.append(msg)
 
 
 def is_single_video_url(url: str) -> bool:
@@ -41,6 +45,8 @@ def is_single_video_url(url: str) -> bool:
 
 def human_download_error(error: str) -> str:
     e = error.lower()
+    if "not a bot" in e:
+        return "YouTube сейчас не даёт скачивать с сервера (просит подтвердить, что это не бот)"
     if "unsupported url" in e:
         return "этот сайт не поддерживается"
     if "drm" in e:
@@ -62,6 +68,7 @@ async def download_audio(url: str, user_agent: str | None) -> tuple[list[tuple[s
         if d['status'] == 'finished':
             logger.info("Скачивание завершено, начинается пост-обработка...")
 
+    ytdlp_logger = YtdlpLogger()
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'postprocessors': [
@@ -78,7 +85,7 @@ async def download_audio(url: str, user_agent: str | None) -> tuple[list[tuple[s
         'retries': 5,
         'fragment_retries': 5,
         'socket_timeout': 60,
-        'logger': YtdlpLogger(),
+        'logger': ytdlp_logger,
         'source_address': '0.0.0.0',
     }
 
@@ -103,6 +110,8 @@ async def download_audio(url: str, user_agent: str | None) -> tuple[list[tuple[s
         error = human_download_error(str(e))
 
     new_mp3_files = sorted(f for f in set(os.listdir(DOWNLOAD_PATH)) - files_before if f.endswith('.mp3'))
+    if not error and ytdlp_logger.errors:
+        error = human_download_error(ytdlp_logger.errors[-1])
     if not new_mp3_files:
         return [], error or "не удалось скачать трек (ничего не нашлось по ссылке или он длиннее 30 минут)"
 

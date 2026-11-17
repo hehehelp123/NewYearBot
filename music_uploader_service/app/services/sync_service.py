@@ -55,16 +55,20 @@ class YandexMusicManager:
         logger.info("Клиент Яндекс Музыки успешно инициализирован.")
 
     async def find_playlist_by_name(self, playlist_name: str) -> Optional[Playlist]:
+        """Плейлист из списка — без треков, но со свежими ревизией и track_count."""
         try:
             playlists = await self.client.users_playlists_list(user_id=self.user_login)
-            for playlist in playlists:
-                if playlist.title == playlist_name:
-                    # список отдаёт плейлист без треков — берём полный, со свежей ревизией
-                    return await self.client.users_playlists(playlist.kind, self.user_login)
-            return None
+            return next((p for p in playlists if p.title == playlist_name), None)
         except Exception as e:
             logger.error(f"Ошибка при поиске плейлиста: {e}")
             return None
+
+    async def playlist_track_ids(self, kind, owner) -> list[str]:
+        """id треков сырым запросом: библиотека падает на разборе загруженных файлов
+        (у их «исполнителя» нет id), а в общем плейлисте такие треки есть всегда."""
+        c = self.client
+        data = await c._request.get(f"{c.base_url}/users/{owner}/playlists/{kind}", params={"richTracks": "false"})
+        return [str(t["id"]) for t in ((data or {}).get("tracks") or []) if t.get("id")]
 
     async def add_tracks_to_playlist(self, playlist: Playlist, items: List[dict]) -> bool:
         if not items:
@@ -112,13 +116,11 @@ class YandexMusicManager:
         return [], "не понял ссылку Яндекс Музыки — пришли трек, альбом или плейлист"
 
     async def _playlist_tracks(self, kind, owner) -> list[Track]:
-        playlist = await self.client.users_playlists(kind, owner)
-        if not playlist or not playlist.tracks:
-            return []
-        tracks = [ts.track for ts in playlist.tracks if ts.track]
-        missing = [ts.track_id for ts in playlist.tracks if not ts.track]
-        if missing:
-            tracks += list(await self.client.tracks(missing) or [])
+        # загруженные пользователем файлы (id-uuid) в чужой плейлист не перенести — берём только каталог
+        ids = [i for i in await self.playlist_track_ids(kind, owner) if i.isdigit()]
+        tracks = []
+        for start in range(0, len(ids), 100):
+            tracks += list(await self.client.tracks(ids[start:start + 100]) or [])
         return tracks
 
     async def search_track(self, query: str, artist_hint: str | None = None,
@@ -203,7 +205,7 @@ class MusicSyncService:
             if not destination:
                 await self._fail("yandex.upload.failed", user_id, source, "не найден общий плейлист")
                 return
-            existing = {str(ts.track.id if ts.track else ts.id) for ts in (destination.tracks or [])}
+            existing = set(await self.yandex_manager.playlist_track_ids(destination.kind, self.yandex_manager.user_login))
             seen, to_add, items = set(), [], []
             tracks = [t for t in tracks if t]
             for t in tracks:
@@ -304,6 +306,28 @@ class MusicSyncService:
         return False
 
     @staticmethod
+    async def _youtube_label(url: str) -> str | None:
+        """«Исполнитель — Название» ролика через официальный oEmbed (работает, даже когда
+        само видео с сервера не скачать)."""
+        host = _host(url)
+        if not ("youtube.com" in host or host == "youtu.be"):
+            return None
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get("https://www.youtube.com/oembed", params={"url": url, "format": "json"},
+                                 timeout=aiohttp.ClientTimeout(total=15)) as r:
+                    data = await r.json(content_type=None)
+        except Exception as e:
+            logger.warning(f"oEmbed для {url} не ответил: {e}")
+            return None
+        title = (data or {}).get("title") or ""
+        if any(sep in title for sep in (" — ", " - ", " – ")):
+            return title
+        # музыкальные каналы YouTube: «Artist - Topic», «ArtistVEVO»
+        author = re.sub(r"\s*-\s*Topic$|VEVO$", "", (data or {}).get("author_name") or "").strip()
+        return f"{author} — {title}" if author and title else None
+
+    @staticmethod
     def _split_title(label: str) -> tuple[str | None, str]:
         for sep in (" — ", " - ", " – "):
             if sep in label:
@@ -340,7 +364,12 @@ class MusicSyncService:
 
                     downloaded, error = await download_audio(source_url, user_agent)
                     if not downloaded:
-                        await self._fail("selenium.upload.failed", user_id, source_url, error)
+                        label = await self._youtube_label(source_url)
+                        fallback = await self._catalog_fallback([label]) if label else []
+                        if fallback:
+                            await self._add_tracks(user_id, source_url, fallback, matched_query=label)
+                        else:
+                            await self._fail("selenium.upload.failed", user_id, source_url, error)
                         return
 
                     not_ready = await selenium_uploader.check_ready(driver)
