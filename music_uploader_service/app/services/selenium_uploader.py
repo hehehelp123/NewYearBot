@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -32,9 +33,10 @@ class SeleniumUploader:
         options.add_argument("--disable-gpu")
 
         try:
-            driver = webdriver.Remote(
-                command_executor=settings.SELENIUM_URL_MUSIC,
-                options=options
+            # всё общение с Selenium синхронное — уводим в поток, иначе стоит event loop
+            # и Kafka выкидывает консьюмер из группы (запросы потом приходят повторно)
+            driver = await asyncio.to_thread(
+                webdriver.Remote, command_executor=settings.SELENIUM_URL_MUSIC, options=options
             )
             logger.info("Сессия Selenium (Music) успешно создана.")
             yield driver
@@ -43,7 +45,7 @@ class SeleniumUploader:
             raise
         finally:
             if driver:
-                driver.quit()
+                await asyncio.to_thread(driver.quit)
                 logger.info("Сессия Selenium (Music) закрыта.")
 
     async def export_cookies(self, driver: webdriver.Remote):
@@ -99,7 +101,32 @@ class SeleniumUploader:
         cookie_jar.save(COOKIE_FILE, ignore_discard=True, ignore_expires=False)
         logger.info(f"Cookies (Music) успешно и стандартизированно сохранены в файл: {COOKIE_FILE}")
 
+    def _check_ready_sync(self, driver: webdriver.Remote) -> str | None:
+        driver.get(settings.SELENIUM_PLAYLIST_URL)
+        try:
+            WebDriverWait(driver, 25).until(lambda d: "passport.yandex" in d.current_url or d.find_elements(
+                By.XPATH, "//button[normalize-space()='Upload track' or normalize-space()='Загрузить трек']"))
+        except TimeoutException:
+            pass
+        if "passport.yandex" in driver.current_url:
+            return "login"
+        if not driver.find_elements(By.CSS_SELECTOR, "input[type='file']"):
+            return "no_upload_button"
+        return None
+
+    async def check_ready(self, driver: webdriver.Remote) -> str | None:
+        """None — можно загружать; 'login' — слетел вход в Яндекс; 'no_upload_button' — поменялась вёрстка."""
+        try:
+            return await asyncio.to_thread(self._check_ready_sync, driver)
+        except Exception as e:
+            logger.error(f"Не удалось открыть плейлист в Selenium: {e}")
+            return "page_error"
+
     async def upload_track(self, driver: webdriver.Remote, track_path: str) -> bool:
+        """True — файл отдан странице. Попал ли трек в плейлист, проверяет вызывающий через API."""
+        return await asyncio.to_thread(self._upload_track_sync, driver, track_path)
+
+    def _upload_track_sync(self, driver: webdriver.Remote, track_path: str) -> bool:
         max_attempts = 3
         retry_delay = 1
         absolute_track_path = os.path.abspath(track_path)
@@ -115,7 +142,8 @@ class SeleniumUploader:
             for attempt in range(max_attempts):
                 try:
                     wait = WebDriverWait(driver, 20)
-                    upload_container_xpath = "//button[normalize-space()='Upload track']/ancestor::div[1]"
+                    upload_container_xpath = ("//button[normalize-space()='Upload track' or "
+                                              "normalize-space()='Загрузить трек']/ancestor::div[1]")
                     upload_container = wait.until(EC.presence_of_element_located((By.XPATH, upload_container_xpath)))
                     file_input = upload_container.find_element(By.CSS_SELECTOR, "input[type='file']")
 
@@ -129,7 +157,13 @@ class SeleniumUploader:
                     file_input.send_keys(absolute_track_path)
 
                     loader_locator = (By.CSS_SELECTOR, ".file-loader_uploading")
-                    wait.until(EC.presence_of_element_located(loader_locator))
+                    try:
+                        wait.until(EC.presence_of_element_located(loader_locator))
+                    except TimeoutException:
+                        # индикатор мог мелькнуть быстрее, чем мы его увидели — результат проверит API
+                        logger.warning("Индикатор загрузки не появился.")
+                        time.sleep(5)
+                        return True
                     logger.info("Процесс загрузки начался. Ожидание завершения...")
                     upload_wait = WebDriverWait(driver, 300)
                     upload_wait.until(EC.invisibility_of_element_located(loader_locator))
@@ -145,9 +179,8 @@ class SeleniumUploader:
                     )
                     time.sleep(retry_delay)
                 except TimeoutException:
-                    logger.warning("Не удалось отследить индикатор загрузки. Возможно, трек уже загружен.")
-                    time.sleep(5)
-                    return True
+                    logger.error("Не нашлась кнопка загрузки или загрузка не закончилась за 5 минут.")
+                    return False
 
             logger.error(f"Не удалось загрузить трек после {max_attempts} попыток.")
             return False

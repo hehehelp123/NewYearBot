@@ -21,7 +21,7 @@ def get_features():
                         "payload": {
                             "source_url": {
                                 "type": "string",
-                                "description": "URL трека или плейлиста"
+                                "description": "ссылка (Яндекс Музыка, YouTube, SoundCloud, Spotify, VK-видео…) или «Исполнитель — Название»"
                             }
                         }
                     }

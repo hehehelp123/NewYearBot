@@ -41,6 +41,46 @@ def _trip_line(ticket: dict) -> str:
     return escape_markdown(", ".join(parts))
 
 
+def _plural_tracks(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} трек"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} трека"
+    return f"{n} треков"
+
+
+def _music_message(event_type: str, data: dict) -> str:
+    """MarkdownV2-текст по итогам добавления музыки."""
+    e = escape_markdown
+    if event_type.endswith(".failed"):
+        reason = data.get("reason") or "что-то пошло не так"
+        return f"❌ Не получилось добавить музыку: {e(reason)}"
+
+    titles = data.get("titles") or ([data["title"]] if data.get("title") else [])
+    shown = "\n".join(f"• {e(t)}" for t in titles[:10])
+    if len(titles) > 10:
+        shown += f"\n…и ещё {len(titles) - 10}"
+
+    if event_type == "selenium.upload.success":
+        text = f"✅ Скачал и загрузил в плейлист {_plural_tracks(len(titles))}:\n{shown}"
+        failed = data.get("failed_titles") or []
+        if failed:
+            text += f"\n\n⚠️ Не загрузились: {e(', '.join(failed[:5]))}"
+        return text
+
+    playlist = e(data.get("destination_playlist") or "плейлист")
+    added, already = data.get("added_count", 0), data.get("already_count", 0)
+    if not added:
+        return f"👌 Это уже есть в плейлисте «{playlist}»:\n{shown}"
+    head = f"✅ Добавил в «{playlist}» {_plural_tracks(added)}"
+    if data.get("matched_query"):
+        head = f"✅ Нашёл в Яндекс Музыке и добавил в «{playlist}»"
+    text = f"{head}:\n{shown}"
+    if already:
+        text += f"\n\n{_plural_tracks(already)} уже были в плейлисте"
+    return text
+
+
 class NotificationService:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
@@ -58,10 +98,9 @@ class NotificationService:
             message = f"Добро пожаловать в систему, {username}\\!"
             await self._send_immediate(chat_id, message)
 
-        elif event_type == "selenium.upload.success":
-            title = escape_markdown(event_data.get("title", "Неизвестный трек"))
-            message = f"✅ Трек *{title}* успешно скачан и загружен в ваш плейлист\\!"
-            await self._send_immediate(chat_id, message)
+        elif event_type in ("selenium.upload.success", "yandex.upload.success",
+                            "selenium.upload.failed", "yandex.upload.failed"):
+            await self._send_immediate(chat_id, _music_message(event_type, event_data))
 
         elif event_type == "ticket.created":
             await self._handle_ticket_created(event_data)

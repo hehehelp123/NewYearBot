@@ -67,5 +67,8 @@ kafka-topics --create --if-not-exists --topic music.sync.request --bootstrap-ser
 kafka-topics --create --if-not-exists --topic music.sync.completed --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
 
 kafka-topics --create --if-not-exists --topic selenium.upload.success --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
+kafka-topics --create --if-not-exists --topic selenium.upload.failed --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
+kafka-topics --create --if-not-exists --topic yandex.upload.success --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
+kafka-topics --create --if-not-exists --topic yandex.upload.failed --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
 
 echo "All topics created successfully."

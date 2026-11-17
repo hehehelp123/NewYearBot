@@ -11,6 +11,9 @@ async def lifespan(app: FastAPI):
     consumer = KafkaNotificationConsumer(
         "user.user.created",
         "selenium.upload.success",
+        "selenium.upload.failed",
+        "yandex.upload.success",
+        "yandex.upload.failed",
         "ticket.created",
         "ticket.list.retrieved",
         "notification.schedule",

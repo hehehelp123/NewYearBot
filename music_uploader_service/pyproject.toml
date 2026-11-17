@@ -13,7 +13,8 @@ pydantic-settings = "^2.2.1"
 aiokafka = "^0.10.0"
 yandex-music = "^2.2.0"
 selenium = "^4.22.0"
-yt-dlp = "^2025.9.26"
+yt-dlp = {extras = ["default"], version = ">=2026.10.26"}
+deno = ">=2.5"
 mutagen = "^1.47.0"
 
 [tool.poetry.group.dev.dependencies]
